@@ -35,4 +35,11 @@ public sealed class PiiGuardOptions
     /// </summary>
     public IList<string> AdditionalPatterns { get; set; } = [];
 
+    /// <summary>
+    /// Maximum allowed message length in characters. Messages exceeding this limit are rejected before
+    /// PII pattern matching. <see cref="PiiCheckResult.MatchedPattern"/> will be <c>"max-length"</c>.
+    /// Defaults to 2000.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int MaxMessageLength { get; set; } = 2000;
 }

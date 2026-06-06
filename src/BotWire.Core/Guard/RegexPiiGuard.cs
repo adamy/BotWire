@@ -36,12 +36,14 @@ internal sealed class RegexPiiGuard : IPiiGuard
     ];
 
     private readonly bool _enabled;
+    private readonly int _maxMessageLength;
     private readonly (Regex Regex, string Name)[] _compiled;
 
     public RegexPiiGuard(IOptions<PiiGuardOptions> options, ILogger<RegexPiiGuard> logger)
     {
         var opts = options.Value;
         _enabled = opts.Enabled;
+        _maxMessageLength = opts.MaxMessageLength;
 
         var list = new List<(Regex, string)>(DefaultPatterns.Length + opts.AdditionalPatterns.Count);
 
@@ -74,6 +76,9 @@ internal sealed class RegexPiiGuard : IPiiGuard
     {
         if (!_enabled)
             return new PiiCheckResult(false, null);
+
+        if (message.Length > _maxMessageLength)
+            return new PiiCheckResult(true, "max-length");
 
         foreach (var (regex, name) in _compiled)
         {

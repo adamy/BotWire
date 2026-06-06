@@ -66,6 +66,35 @@ public class RegexPiiGuardTests
         Assert.Null(result.MatchedPattern);
     }
 
+    // ----- MaxMessageLength -----
+
+    [Fact]
+    public void Check_MessageAtLimit_NotBlocked()
+    {
+        var guard = Create(o => o.MaxMessageLength = 10);
+        var result = guard.Check("1234567890");
+        Assert.False(result.Blocked);
+    }
+
+    [Fact]
+    public void Check_MessageExceedsLimit_BlockedWithMaxLengthPattern()
+    {
+        var guard = Create(o => o.MaxMessageLength = 10);
+        var result = guard.Check("12345678901"); // 11 chars
+        Assert.True(result.Blocked);
+        Assert.Equal("max-length", result.MatchedPattern);
+    }
+
+    [Fact]
+    public void Check_LengthCheckBeforePii_ReturnsMaxLengthPattern()
+    {
+        var guard = Create(o => o.MaxMessageLength = 5);
+        // message is both too long AND contains an email — length check wins
+        var result = guard.Check("contact me at user@example.com");
+        Assert.True(result.Blocked);
+        Assert.Equal("max-length", result.MatchedPattern);
+    }
+
     // ----- AdditionalPatterns -----
 
     [Fact]
