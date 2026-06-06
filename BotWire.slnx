@@ -9,6 +9,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BotWire.AspNetCore.Tests/BotWire.AspNetCore.Tests.csproj" />
+    <Project Path="tests/BotWire.Channels.Email.Tests/BotWire.Channels.Email.Tests.csproj" />
     <Project Path="tests/BotWire.Core.Tests/BotWire.Core.Tests.csproj" />
   </Folder>
 </Solution>
