@@ -16,9 +16,15 @@
 
 namespace BotWire.Core.Abstractions;
 
-/// <summary>
-/// Convenience interface for providers that support both chat and embedding.
-/// Inject <see cref="ILlmChatClient"/> or <see cref="ILlmEmbedClient"/> directly
-/// when you need only one capability.
-/// </summary>
-public interface ILlmClient : ILlmChatClient, ILlmEmbedClient { }
+/// <summary>Abstracts text embedding generation with a large language model provider.</summary>
+public interface ILlmEmbedClient
+{
+    /// <summary>Human-readable name of this provider, e.g. <c>openai</c>.</summary>
+    string Name { get; }
+
+    /// <summary>Generates a vector embedding for the given text.</summary>
+    /// <param name="text">The input text to embed.</param>
+    /// <param name="cancellationToken">Token to cancel the request.</param>
+    /// <returns>A floating-point embedding vector.</returns>
+    Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default);
+}
