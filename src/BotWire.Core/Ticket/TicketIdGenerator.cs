@@ -14,21 +14,21 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-namespace BotWire.Core.Enums;
+namespace BotWire.Core.Ticket;
 
-/// <summary>Indicates whether the bot answered successfully or needs to escalate to a human agent.</summary>
-public enum AnswerStatus
+/// <summary>
+/// Thread-safe generator for support ticket identifiers.
+/// Format: <c>{prefix}-{yyyyMMdd}-{seq:D4}</c>, e.g. <c>TKT-20260606-0001</c>.
+/// The sequence counter resets on process restart (Phase 1 — no persistence needed).
+/// </summary>
+internal static class TicketIdGenerator
 {
-    /// <summary>The bot provided a satisfactory answer.</summary>
-    Answered,
+    private static long _counter;
 
-    /// <summary>The bot could not answer and the conversation should be escalated to a human agent.</summary>
-    NeedHuman,
-
-    /// <summary>
-    /// A support ticket was created after the user supplied contact details.
-    /// Callers must clear <see cref="BotWire.Core.Models.ConversationSession.EscalationPending"/> on the
-    /// stored session to prevent duplicate ticket generation on the next call.
-    /// </summary>
-    TicketCreated,
+    /// <summary>Returns the next unique ticket identifier using the supplied prefix, today's date, and an incrementing sequence.</summary>
+    public static string Next(string prefix)
+    {
+        var seq = Interlocked.Increment(ref _counter);
+        return $"{prefix}-{DateTimeOffset.UtcNow:yyyyMMdd}-{seq:D4}";
+    }
 }

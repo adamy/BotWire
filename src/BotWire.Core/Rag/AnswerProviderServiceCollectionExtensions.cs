@@ -16,6 +16,9 @@
 
 using BotWire.Core.Abstractions;
 using BotWire.Core.Rag;
+using BotWire.Core.Ticket;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -34,10 +37,19 @@ public static class AnswerProviderServiceCollectionExtensions
         this IServiceCollection services,
         Action<AnswerProviderOptions> configure)
     {
-        services.AddOptions<AnswerProviderOptions>().Configure(configure).ValidateDataAnnotations();
+        services.AddOptions<AnswerProviderOptions>().Configure(configure).ValidateDataAnnotations().ValidateOnStart();
 
         services.AddSingleton<IDocumentLoader, DocumentLoader>();
-        services.AddSingleton<IAnswerProvider, AnswerProvider>();
+        services.AddSingleton<TicketGenerator>(sp => new TicketGenerator(
+            sp.GetRequiredService<ILlmChatClient>(),
+            sp.GetRequiredService<IOptions<AnswerProviderOptions>>(),
+            sp.GetRequiredService<ILogger<TicketGenerator>>()));
+        services.AddSingleton<IAnswerProvider>(sp => new AnswerProvider(
+            sp.GetRequiredService<ILlmChatClient>(),
+            sp.GetRequiredService<IDocumentLoader>(),
+            sp.GetRequiredService<TicketGenerator>(),
+            sp.GetRequiredService<IOptions<AnswerProviderOptions>>(),
+            sp.GetRequiredService<ILogger<AnswerProvider>>()));
 
         return services;
     }

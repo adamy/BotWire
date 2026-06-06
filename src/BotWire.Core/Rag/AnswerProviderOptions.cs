@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+using System.ComponentModel.DataAnnotations;
+
 namespace BotWire.Core.Rag;
 
 /// <summary>Configuration for the RAG <see cref="AnswerProvider"/> (Phase 1, Mode A).</summary>
@@ -30,4 +32,12 @@ public sealed class AnswerProviderOptions
     /// tone guideline. The control-word protocol instruction is always appended by BotWire.
     /// </summary>
     public string? SystemPromptPreamble { get; set; }
+
+    /// <summary>
+    /// Prefix used when generating support ticket IDs, e.g. <c>"TKT"</c> produces
+    /// <c>TKT-20260606-0001</c>. Must be at least one character. Defaults to <c>"TKT"</c>.
+    /// </summary>
+    [Required]
+    [MinLength(1)]
+    public string TicketPrefix { get; set; } = "TKT";
 }

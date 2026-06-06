@@ -19,6 +19,7 @@ using System.Text;
 using BotWire.Core.Abstractions;
 using BotWire.Core.Enums;
 using BotWire.Core.Models;
+using BotWire.Core.Ticket;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -33,6 +34,7 @@ public sealed class AnswerProvider : IAnswerProvider
 {
     private readonly ILlmChatClient _chat;
     private readonly IDocumentLoader _loader;
+    private readonly TicketGenerator _ticketGenerator;
     private readonly AnswerProviderOptions _options;
     private readonly ILogger<AnswerProvider> _logger;
 
@@ -42,16 +44,19 @@ public sealed class AnswerProvider : IAnswerProvider
     /// <summary>Initializes a new instance.</summary>
     /// <param name="chat">The chat LLM used to generate answers.</param>
     /// <param name="loader">Loader for the knowledge-base documents.</param>
+    /// <param name="ticketGenerator">Generator for escalation support tickets.</param>
     /// <param name="options">Bound provider options (document paths, preamble).</param>
     /// <param name="logger">Logger for fail-open diagnostics.</param>
-    public AnswerProvider(
+    internal AnswerProvider(
         ILlmChatClient chat,
         IDocumentLoader loader,
+        TicketGenerator ticketGenerator,
         IOptions<AnswerProviderOptions> options,
         ILogger<AnswerProvider> logger)
     {
         _chat = chat;
         _loader = loader;
+        _ticketGenerator = ticketGenerator;
         _options = options.Value;
         _logger = logger;
     }
@@ -60,8 +65,18 @@ public sealed class AnswerProvider : IAnswerProvider
     public async Task<AnswerResult> AnswerAsync(
         string message,
         ConversationSession session,
+        ContactInfo? contact = null,
         CancellationToken cancellationToken = default)
     {
+        if (session.EscalationPending && contact is not null)
+        {
+            if (session.EscalationTriggerMessage is null)
+                _logger.LogWarning("BotWire: EscalationPending is true but EscalationTriggerMessage is null; falling back to current message as ticket UserMessage.");
+            var ticket = await _ticketGenerator.GenerateAsync(
+                session, session.EscalationTriggerMessage ?? message, contact, cancellationToken);
+            return new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId);
+        }
+
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
 
@@ -78,8 +93,20 @@ public sealed class AnswerProvider : IAnswerProvider
     public async IAsyncEnumerable<BotEvent> StreamAsync(
         string message,
         ConversationSession session,
+        ContactInfo? contact = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (session.EscalationPending && contact is not null)
+        {
+            if (session.EscalationTriggerMessage is null)
+                _logger.LogWarning("BotWire: EscalationPending is true but EscalationTriggerMessage is null; falling back to current message as ticket UserMessage.");
+            var ticket = await _ticketGenerator.GenerateAsync(
+                session, session.EscalationTriggerMessage ?? message, contact, cancellationToken);
+            yield return BotEvent.TicketConfirmed(ticket.TicketId);
+            yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
+            yield break;
+        }
+
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
 
@@ -107,6 +134,7 @@ public sealed class AnswerProvider : IAnswerProvider
                 if (ResponseControl.StartsWith(prefix, ResponseControl.Escalate))
                 {
                     yield return BotEvent.Escalated();
+                    yield return BotEvent.CollectContact();
                     yield break;
                 }
 
@@ -149,6 +177,7 @@ public sealed class AnswerProvider : IAnswerProvider
             if (ResponseControl.StartsWith(trimmed, ResponseControl.Escalate))
             {
                 yield return BotEvent.Escalated();
+                yield return BotEvent.CollectContact();
                 yield break;
             }
 

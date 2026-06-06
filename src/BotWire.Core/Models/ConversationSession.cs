@@ -19,6 +19,16 @@ namespace BotWire.Core.Models;
 /// <summary>Holds the in-progress conversation state for a single user session.</summary>
 /// <param name="History">Ordered list of messages exchanged in this session.</param>
 /// <param name="LastActivity">UTC timestamp of the most recent activity in this session.</param>
+/// <param name="EscalationPending">
+/// True when the bot has emitted an ESCALATE control word and is waiting for the user to
+/// supply contact details before a support ticket can be generated.
+/// </param>
+/// <param name="EscalationTriggerMessage">
+/// The user message that caused the escalation; used as <see cref="SupportTicket.UserMessage"/>
+/// when the ticket is created. Null when <see cref="EscalationPending"/> is false.
+/// </param>
 public sealed record ConversationSession(
     List<ChatMessage> History,
-    DateTimeOffset LastActivity);
+    DateTimeOffset LastActivity,
+    bool EscalationPending = false,
+    string? EscalationTriggerMessage = null);

@@ -18,6 +18,7 @@ using BotWire.Core.Abstractions;
 using BotWire.Core.Enums;
 using BotWire.Core.Models;
 using BotWire.Core.Rag;
+using BotWire.Core.Ticket;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -25,12 +26,16 @@ namespace BotWire.Core.Tests.Rag;
 
 public class AnswerProviderTests
 {
-    private static AnswerProvider CreateProvider(FakeLlmChatClient chat) =>
-        new(
+    private static AnswerProvider CreateProvider(FakeLlmChatClient chat, FakeLlmChatClient? ticketChat = null)
+    {
+        var options = Options.Create(new AnswerProviderOptions());
+        return new(
             chat,
             new FakeDocumentLoader("doc content"),
-            Options.Create(new AnswerProviderOptions()),
+            new TicketGenerator(ticketChat ?? chat, options, NullLogger<TicketGenerator>.Instance),
+            options,
             NullLogger<AnswerProvider>.Instance);
+    }
 
     private static ConversationSession EmptySession() => new([], DateTimeOffset.UtcNow);
 
@@ -97,15 +102,17 @@ public class AnswerProviderTests
     }
 
     [Fact]
-    public async Task StreamAsync_EscalateSentinel_EmitsOnlyEscalateNoContent()
+    public async Task StreamAsync_EscalateSentinel_EmitsEscalateAndCollectContactNoContent()
     {
         var chat = new FakeLlmChatClient("unused", ["ESCALATE\n", "internal reason that must not leak"]);
         var provider = CreateProvider(chat);
 
         var events = await CollectAsync(provider.StreamAsync("refund", EmptySession()));
 
-        Assert.Single(events);
+        Assert.Equal(2, events.Count);
         Assert.Equal(BotEventKind.Escalated, events[0].Kind);
+        Assert.Equal(BotEventKind.CollectContact, events[1].Kind);
+        Assert.DoesNotContain(events, e => e.Kind == BotEventKind.TextChunk);
     }
 
     [Fact]
@@ -116,8 +123,9 @@ public class AnswerProviderTests
 
         var events = await CollectAsync(provider.StreamAsync("x", EmptySession()));
 
-        Assert.Single(events);
+        Assert.Equal(2, events.Count);
         Assert.Equal(BotEventKind.Escalated, events[0].Kind);
+        Assert.Equal(BotEventKind.CollectContact, events[1].Kind);
     }
 
     [Fact]
@@ -142,7 +150,57 @@ public class AnswerProviderTests
 
         var events = await CollectAsync(provider.StreamAsync("x", EmptySession()));
 
-        Assert.Single(events);
+        Assert.Equal(2, events.Count);
         Assert.Equal(BotEventKind.Escalated, events[0].Kind);
+        Assert.Equal(BotEventKind.CollectContact, events[1].Kind);
+    }
+
+    // ----- Escalation lifecycle -----
+
+    [Fact]
+    public async Task StreamAsync_EscalationPendingWithContact_EmitsTicketConfirmedAndDone()
+    {
+        const string ticketJson = """{"summary":"Refund issue","details":"User wants refund","priority":"medium"}""";
+        var ticketChat = new FakeLlmChatClient(ticketJson);
+        var provider = CreateProvider(new FakeLlmChatClient("unused"), ticketChat);
+        var session = new ConversationSession([], DateTimeOffset.UtcNow, EscalationPending: true, EscalationTriggerMessage: "I want a refund");
+        var contact = new ContactInfo("a@b.com", null);
+
+        var events = await CollectAsync(provider.StreamAsync("contact submitted", session, contact));
+
+        Assert.Equal(2, events.Count);
+        Assert.Equal(BotEventKind.TicketConfirmed, events[0].Kind);
+        Assert.Equal(BotEventKind.Done, events[1].Kind);
+        Assert.Equal(AnswerStatus.TicketCreated, events[1].Result!.Status);
+        Assert.NotNull(events[0].TicketId);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_EscalationPendingWithContact_ReturnsTicketId()
+    {
+        const string ticketJson = """{"summary":"s","details":"d","priority":"low"}""";
+        var ticketChat = new FakeLlmChatClient(ticketJson);
+        var provider = CreateProvider(new FakeLlmChatClient("unused"), ticketChat);
+        var session = new ConversationSession([], DateTimeOffset.UtcNow, EscalationPending: true, EscalationTriggerMessage: "need help");
+        var contact = new ContactInfo("x@y.com", null);
+
+        var result = await provider.AnswerAsync("contact submitted", session, contact);
+
+        Assert.Equal(AnswerStatus.TicketCreated, result.Status);
+        Assert.Matches(@"^TKT-\d{8}-\d{4,}$", result.Message);
+    }
+
+    [Fact]
+    public async Task StreamAsync_EscalationPendingWithoutContact_FallsThroughToNormalRag()
+    {
+        var chat = new FakeLlmChatClient("ANSWER\nHere is your answer.");
+        var provider = CreateProvider(chat);
+        var session = new ConversationSession([], DateTimeOffset.UtcNow, EscalationPending: true);
+
+        // No contact supplied — should NOT generate ticket, should run normal RAG
+        var events = await CollectAsync(provider.StreamAsync("hello", session, contact: null));
+
+        Assert.Equal(BotEventKind.Done, events[^1].Kind);
+        Assert.Contains(events, e => e.Kind == BotEventKind.TextChunk);
     }
 }
