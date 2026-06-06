@@ -142,6 +142,26 @@ public class InMemoryConversationStoreTests
     }
 
     [Fact]
+    public void TrimHistory_SystemExceedsCapWithNonSystem_DropsAllNonSystemKeepsSystem()
+    {
+        // 3 system + 2 user, cap = 2: system messages are never dropped, so all 3 system
+        // messages are kept and both user messages are dropped. Result exceeds the cap.
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.System, "sys1"),
+            new(ChatRole.System, "sys2"),
+            new(ChatRole.System, "sys3"),
+            User("u1"),
+            User("u2"),
+        };
+
+        var result = InMemoryConversationStore.TrimHistory(history, max: 2);
+
+        Assert.Equal(3, result.Count);
+        Assert.All(result, m => Assert.Equal(ChatRole.System, m.Role));
+    }
+
+    [Fact]
     public async Task RemoveExpired_RemovesOnlySessionsPastTtl()
     {
         using var store = CreateStore(ttl: TimeSpan.FromMinutes(30));

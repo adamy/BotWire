@@ -25,8 +25,17 @@ public enum BotEventKind
     /// <summary>The response is complete and a final <see cref="BotWire.Core.Models.AnswerResult"/> is available.</summary>
     Done,
 
-    /// <summary>The bot is escalating the conversation; a <see cref="BotWire.Core.Models.SupportTicket"/> has been created.</summary>
+    /// <summary>The bot is escalating the conversation to a human. A <see cref="BotWire.Core.Models.SupportTicket"/> may be attached once one has been created.</summary>
     Escalated,
+
+    /// <summary>The bot is requesting the user's contact details so a human can follow up.</summary>
+    CollectContact,
+
+    /// <summary>The response was blocked (e.g. by a safety or policy filter); <see cref="BotWire.Core.Models.BotEvent.Reason"/> explains why.</summary>
+    Blocked,
+
+    /// <summary>A support ticket was created and confirmed; <see cref="BotWire.Core.Models.BotEvent.TicketId"/> identifies it.</summary>
+    TicketConfirmed,
 
     /// <summary>An error occurred during processing.</summary>
     Error,

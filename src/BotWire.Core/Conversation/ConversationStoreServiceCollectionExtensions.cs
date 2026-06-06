@@ -25,8 +25,8 @@ public static class ConversationStoreServiceCollectionExtensions
     /// <summary>
     /// Registers <see cref="InMemoryConversationStore"/> as a singleton bound to
     /// <see cref="IConversationStore"/>. The store owns a background timer that evicts idle
-    /// sessions; the DI container disposes it (stopping the timer) on host shutdown.
-    /// Options are validated with their DataAnnotations on startup.
+    /// sessions; the DI container disposes it (stopping the timer) on shutdown. Options are
+    /// validated with their DataAnnotations on first resolve.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional delegate to customise <see cref="ConversationStoreOptions"/>.</param>
@@ -36,8 +36,7 @@ public static class ConversationStoreServiceCollectionExtensions
         Action<ConversationStoreOptions>? configure = null)
     {
         var optionsBuilder = services.AddOptions<ConversationStoreOptions>()
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+            .ValidateDataAnnotations();
 
         if (configure is not null)
             optionsBuilder.Configure(configure);

@@ -33,8 +33,14 @@ public sealed record BotEvent
     /// <summary>Final answer result. Populated when <see cref="Kind"/> is <see cref="BotEventKind.Done"/>.</summary>
     public AnswerResult? Result { get; init; }
 
-    /// <summary>Escalation ticket. Populated when <see cref="Kind"/> is <see cref="BotEventKind.Escalated"/>.</summary>
+    /// <summary>Escalation ticket. May be populated when <see cref="Kind"/> is <see cref="BotEventKind.Escalated"/>.</summary>
     public SupportTicket? Ticket { get; init; }
+
+    /// <summary>Reason the response was blocked. Populated when <see cref="Kind"/> is <see cref="BotEventKind.Blocked"/>.</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>Confirmed support ticket identifier. Populated when <see cref="Kind"/> is <see cref="BotEventKind.TicketConfirmed"/>.</summary>
+    public string? TicketId { get; init; }
 
     /// <summary>Error message. Populated when <see cref="Kind"/> is <see cref="BotEventKind.Error"/>.</summary>
     public string? ErrorMessage { get; init; }
@@ -49,10 +55,28 @@ public sealed record BotEvent
     public static BotEvent Done(AnswerResult result) =>
         new() { Kind = BotEventKind.Done, Result = result };
 
-    /// <summary>Creates a <see cref="BotEventKind.Escalated"/> event.</summary>
+    /// <summary>Creates a <see cref="BotEventKind.Escalated"/> event with an attached ticket.</summary>
     /// <param name="ticket">The support ticket generated for the escalation.</param>
     public static BotEvent Escalated(SupportTicket ticket) =>
         new() { Kind = BotEventKind.Escalated, Ticket = ticket };
+
+    /// <summary>Creates a <see cref="BotEventKind.Escalated"/> event with no ticket yet (the escalation flow has only just begun).</summary>
+    public static BotEvent Escalated() =>
+        new() { Kind = BotEventKind.Escalated };
+
+    /// <summary>Creates a <see cref="BotEventKind.CollectContact"/> event.</summary>
+    public static BotEvent CollectContact() =>
+        new() { Kind = BotEventKind.CollectContact };
+
+    /// <summary>Creates a <see cref="BotEventKind.Blocked"/> event.</summary>
+    /// <param name="reason">Why the response was blocked.</param>
+    public static BotEvent Blocked(string reason) =>
+        new() { Kind = BotEventKind.Blocked, Reason = reason };
+
+    /// <summary>Creates a <see cref="BotEventKind.TicketConfirmed"/> event.</summary>
+    /// <param name="ticketId">The identifier of the confirmed ticket.</param>
+    public static BotEvent TicketConfirmed(string ticketId) =>
+        new() { Kind = BotEventKind.TicketConfirmed, TicketId = ticketId };
 
     /// <summary>Creates a <see cref="BotEventKind.Error"/> event.</summary>
     /// <param name="message">A description of the error.</param>

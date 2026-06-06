@@ -96,9 +96,10 @@ public sealed class InMemoryConversationStore : IConversationStore, IDisposable
     }
 
     /// <summary>
-    /// Keeps all system messages plus the newest non-system messages so the total does not
-    /// exceed <paramref name="max"/>, preserving original ordering. If system messages alone
-    /// already meet or exceed <paramref name="max"/>, the list is returned unchanged.
+    /// Keeps all system messages and the newest non-system messages, preserving original ordering.
+    /// System messages are never dropped; if they alone exceed <paramref name="max"/>, non-system
+    /// messages are still trimmed to zero but the result may contain more than <paramref name="max"/>
+    /// entries. When all messages are system and no non-system exist, the list is returned unchanged.
     /// </summary>
     internal static List<ChatMessage> TrimHistory(List<ChatMessage> history, int max)
     {
