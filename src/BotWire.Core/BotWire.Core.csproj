@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Authors>Object IT Limited</Authors>
+    <Company>Object IT Limited</Company>
+    <Description>Core abstractions and interfaces for the BotWire customer support bot library.</Description>
+    <PackageTags>botwire;chatbot;customer-support;bot</PackageTags>
+  </PropertyGroup>
+
+</Project>

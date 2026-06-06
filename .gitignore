@@ -1,0 +1,32 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.vs/
+.vs/
+*.nupkg
+*.snupkg
+project.lock.json
+.nuget/
+packages/
+TestResults/
+coverage/
+
+# Node / npm
+node_modules/
+dist/
+.npm/
+npm-debug.log*
+yarn-error.log*
+*.tgz
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
