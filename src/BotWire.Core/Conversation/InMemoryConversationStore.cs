@@ -54,7 +54,7 @@ public sealed class InMemoryConversationStore : IConversationStore, IDisposable
     public Task<ConversationSession?> GetAsync(string token, CancellationToken cancellationToken = default)
     {
         _sessions.TryGetValue(token, out var session);
-        return Task.FromResult(session);
+        return Task.FromResult<ConversationSession?>(session);
     }
 
     /// <inheritdoc/>
@@ -88,7 +88,7 @@ public sealed class InMemoryConversationStore : IConversationStore, IDisposable
 
             // Compare-and-remove: only evict if the snapshot still matches, so a session
             // saved concurrently after this read is not lost.
-            if (_sessions.TryRemove(entry))
+            if (((ICollection<KeyValuePair<string, ConversationSession>>)_sessions).Remove(entry))
                 removed++;
         }
 

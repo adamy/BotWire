@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
     <Authors>Object IT Limited</Authors>
     <Company>Object IT Limited</Company>
     <Description>Core abstractions and interfaces for the BotWire customer support bot library.</Description>

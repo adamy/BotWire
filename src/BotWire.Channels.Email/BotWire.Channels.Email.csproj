@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
     <Authors>Object IT Limited</Authors>
     <Company>Object IT Limited</Company>
     <Description>Email channel adapter for BotWire — send and receive support tickets via SMTP/IMAP.</Description>

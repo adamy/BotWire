@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-using System.Buffers.Text;
 using System.Security.Cryptography;
 using BotWire.Core.Abstractions;
 
@@ -29,7 +28,8 @@ public sealed class SessionTokenService : ISessionTokenService
     /// </summary>
     public string GenerateToken()
     {
-        var bytes = RandomNumberGenerator.GetBytes(32);
-        return Base64Url.EncodeToString(bytes);
+        var bytes = new byte[32];
+        RandomNumberGenerator.Fill(bytes);
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 }
