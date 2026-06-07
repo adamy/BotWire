@@ -130,6 +130,9 @@ public static class BotWireServiceCollectionExtensions
         // ── Startup validation ──────────────────────────────────────────────────
         services.AddTransient<IStartupFilter, BotWireStartupFilter>();
 
+        // ── Endpoint service layer ──────────────────────────────────────────────
+        services.AddScoped<BotWireChatService>();
+
         return services;
     }
 }

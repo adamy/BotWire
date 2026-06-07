@@ -14,15 +14,17 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-namespace BotWire.Core.Models;
+namespace BotWire.AspNetCore;
 
-/// <summary>Contact details for the user who raised a support ticket.</summary>
-/// <param name="Email">Optional email address.</param>
-/// <param name="Phone">Optional phone number.</param>
-/// <param name="Name">Optional display name (e.g. "Jane Smith").</param>
-/// <param name="Username">Optional system username or user ID supplied by the host.</param>
-public sealed record ContactInfo(
-    string? Email,
-    string? Phone,
-    string? Name     = null,
-    string? Username = null);
+/// <summary>Request body for the BotWire chat endpoints.</summary>
+public sealed class ChatRequest
+{
+    /// <summary>The user's message text.</summary>
+    public string Message { get; set; } = "";
+
+    /// <summary>Session token from a previous response. Null to start a new session.</summary>
+    public string? SessionToken { get; set; }
+
+    /// <summary>User contact email for ticket escalation. Null on normal chat turns.</summary>
+    public string? ContactEmail { get; set; }
+}

@@ -27,8 +27,15 @@ namespace BotWire.Core.Models;
 /// The user message that caused the escalation; used as <see cref="SupportTicket.UserMessage"/>
 /// when the ticket is created. Null when <see cref="EscalationPending"/> is false.
 /// </param>
+/// <param name="KnownUser">
+/// Identity injected by the host at session creation (e.g. from the host's own auth system).
+/// Not added to chat history and never sent to the LLM.
+/// When non-null and <see cref="ContactInfo.Email"/> is set, ticket escalation can proceed
+/// without the user needing to re-enter their email.
+/// </param>
 public sealed record ConversationSession(
     List<ChatMessage> History,
     DateTimeOffset LastActivity,
     bool EscalationPending = false,
-    string? EscalationTriggerMessage = null);
+    string? EscalationTriggerMessage = null,
+    ContactInfo? KnownUser = null);

@@ -14,15 +14,21 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-namespace BotWire.Core.Models;
+namespace BotWire.AspNetCore;
 
-/// <summary>Contact details for the user who raised a support ticket.</summary>
-/// <param name="Email">Optional email address.</param>
-/// <param name="Phone">Optional phone number.</param>
-/// <param name="Name">Optional display name (e.g. "Jane Smith").</param>
-/// <param name="Username">Optional system username or user ID supplied by the host.</param>
-public sealed record ContactInfo(
-    string? Email,
-    string? Phone,
-    string? Name     = null,
-    string? Username = null);
+/// <summary>
+/// Request body for <c>POST /support/session</c>.
+/// The host populates whichever fields it has from its own auth system.
+/// All fields are optional — send an empty body to create an anonymous session.
+/// </summary>
+public sealed class InitSessionRequest
+{
+    /// <summary>User's display name (e.g. "Jane Smith"). Used on support tickets.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>Username or user ID from the host application.</summary>
+    public string? Username { get; set; }
+
+    /// <summary>Email address. When present, logged-in users skip the email prompt during escalation.</summary>
+    public string? Email { get; set; }
+}

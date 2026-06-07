@@ -14,15 +14,20 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-namespace BotWire.Core.Models;
+using BotWire.Core.Abstractions;
 
-/// <summary>Contact details for the user who raised a support ticket.</summary>
-/// <param name="Email">Optional email address.</param>
-/// <param name="Phone">Optional phone number.</param>
-/// <param name="Name">Optional display name (e.g. "Jane Smith").</param>
-/// <param name="Username">Optional system username or user ID supplied by the host.</param>
-public sealed record ContactInfo(
-    string? Email,
-    string? Phone,
-    string? Name     = null,
-    string? Username = null);
+namespace BotWire.AspNetCore.Tests.Fakes;
+
+internal sealed class FakePiiGuard : IPiiGuard
+{
+    public static FakePiiGuard Allow => new() { Blocks = false };
+    public static FakePiiGuard Block => new() { Blocks = true };
+
+    public bool Blocks { get; init; }
+    public bool IsEnabled => true;
+
+    public PiiCheckResult Check(string message)
+        => Blocks
+            ? new PiiCheckResult(true,  "test-pattern")
+            : new PiiCheckResult(false, null);
+}
