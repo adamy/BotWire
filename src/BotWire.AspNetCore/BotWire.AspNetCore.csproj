@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BotWire.Core\BotWire.Core.csproj" />
+    <ProjectReference Include="..\BotWire.Channels.Email\BotWire.Channels.Email.csproj" />
   </ItemGroup>
 
 </Project>
