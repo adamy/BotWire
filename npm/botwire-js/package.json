@@ -1,0 +1,14 @@
+{
+  "name": "botwire-js",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/widget.ts --bundle --minify --outfile=dist/botwire.js",
+    "build:fast": "esbuild src/widget.ts --bundle --minify --outfile=dist/botwire.js",
+    "size": "esbuild src/widget.ts --bundle --minify | gzip -c | wc -c"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}

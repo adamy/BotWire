@@ -164,13 +164,23 @@ public static class BotWireEndpointExtensions
 
     // ── GET /botwire/widget.js ──────────────────────────────────────────────────
 
+    private static readonly byte[] _widgetJs = LoadWidgetJs();
+
+    private static byte[] LoadWidgetJs()
+    {
+        var asm    = typeof(BotWireEndpointExtensions).Assembly;
+        using var s  = asm.GetManifestResourceStream("BotWire.AspNetCore.botwire.js")
+            ?? throw new InvalidOperationException("BotWire.AspNetCore.botwire.js embedded resource not found.");
+        using var ms = new MemoryStream();
+        s.CopyTo(ms);
+        return ms.ToArray();
+    }
+
     private static async Task HandleWidgetJs(HttpContext context)
     {
-        context.Response.StatusCode               = 501;
-        context.Response.ContentType              = "application/javascript";
-        context.Response.Headers["Cache-Control"] = "no-store";
-        await context.Response.WriteAsync(
-            "// BotWire embedded widget (Task 14): not yet implemented.");
+        context.Response.ContentType              = "application/javascript; charset=utf-8";
+        context.Response.Headers.CacheControl = "public, max-age=3600";
+        await context.Response.Body.WriteAsync(_widgetJs);
     }
 
     // ── GET /botwire/health ─────────────────────────────────────────────────────

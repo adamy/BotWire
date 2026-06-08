@@ -24,6 +24,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="botwire.js" LogicalName="BotWire.AspNetCore.botwire.js" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>BotWire.AspNetCore.Tests</_Parameter1>
     </AssemblyAttribute>
