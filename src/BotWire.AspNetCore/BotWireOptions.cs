@@ -16,6 +16,7 @@
 
 using System.ComponentModel.DataAnnotations;
 using BotWire.Channels.Email;
+using BotWire.Core.Models;
 
 namespace BotWire.AspNetCore;
 
@@ -66,4 +67,20 @@ public sealed class BotWireOptions
 
     /// <summary>CORS settings for BotWire API endpoints.</summary>
     public BotWireCorsOptions Cors { get; set; } = new();
+
+    /// <summary>
+    /// Message shown to the customer in the widget after a support ticket is confirmed.
+    /// Use <c>{ticketId}</c> as a placeholder for the ticket identifier.
+    /// Defaults to <c>"✓ Support ticket {ticketId} created — we'll be in touch soon."</c>.
+    /// </summary>
+    public string TicketConfirmedMessage { get; set; } =
+        "✓ Support ticket {ticketId} created — we'll be in touch soon.";
+
+    /// <summary>
+    /// Optional async callback invoked after a support ticket is created.
+    /// Use this to integrate ticket creation into the host application — e.g. write to a
+    /// database, push to a queue, or update a CRM.
+    /// Exceptions are caught and logged; a failing callback does not surface an error to the user.
+    /// </summary>
+    public Func<SupportTicket, Task>? OnTicketCreated { get; set; }
 }

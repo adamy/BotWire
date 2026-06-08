@@ -134,7 +134,7 @@ public static class BotWireEndpointExtensions
                     case BotEventKind.TicketConfirmed:
                         confirmedTicketId = evt.TicketId;
                         await WriteSseAsync(response,
-                            $"{{\"type\":\"escalated\",\"ticketId\":{JsonSerializer.Serialize(evt.TicketId)}}}");
+                            $"{{\"type\":\"escalated\",\"ticketId\":{JsonSerializer.Serialize(evt.TicketId)},\"message\":{JsonSerializer.Serialize(evt.ConfirmationMessage)}}}");
                         break;
 
                     case BotEventKind.Blocked:

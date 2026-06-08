@@ -148,10 +148,10 @@ internal sealed class BotWireChatService
     {
         var session = prep.Session!;
 
-        var updatedHistory = new List<ChatMessage>(session.History)
-        {
-            new(ChatRole.User, prep.UserMessage!),
-        };
+        var updatedHistory = new List<ChatMessage>(session.History);
+        // Skip empty user messages (e.g. the placeholder sent when submitting the contact form)
+        if (!string.IsNullOrWhiteSpace(prep.UserMessage))
+            updatedHistory.Add(new ChatMessage(ChatRole.User, prep.UserMessage!));
         if (accumulatedText.Length > 0)
             updatedHistory.Add(new ChatMessage(ChatRole.Assistant, accumulatedText));
 

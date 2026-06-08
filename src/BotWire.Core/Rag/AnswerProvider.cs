@@ -86,6 +86,7 @@ public sealed class AnswerProvider : IAnswerProvider
             return new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId);
         }
 
+
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
 
@@ -112,7 +113,8 @@ public sealed class AnswerProvider : IAnswerProvider
             var ticket = await _ticketGenerator.GenerateAsync(
                 session, session.EscalationTriggerMessage ?? message, contact, cancellationToken);
             await NotifyAsync(ticket, cancellationToken);
-            yield return BotEvent.TicketConfirmed(ticket.TicketId);
+            var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
+            yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
             yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
             yield break;
         }
@@ -120,9 +122,10 @@ public sealed class AnswerProvider : IAnswerProvider
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
 
-        var buffer = new StringBuilder();
-        var answer = new StringBuilder();
-        var resolved = false; // once true, the control-word decision is made and deltas pass through
+        var buffer      = new StringBuilder();
+        var answer      = new StringBuilder();
+        var resolved    = false; // once true, the control-word decision is made and deltas pass through
+        var escalating  = false; // true once ESCALATE control word detected
 
         await foreach (var delta in _chat.ChatStreamingAsync(messages, cancellationToken))
         {
@@ -134,7 +137,7 @@ public sealed class AnswerProvider : IAnswerProvider
             }
 
             buffer.Append(delta);
-            var text = buffer.ToString();
+            var text   = buffer.ToString();
             var newline = text.IndexOf('\n');
 
             if (newline >= 0)
@@ -143,20 +146,28 @@ public sealed class AnswerProvider : IAnswerProvider
 
                 if (ResponseControl.StartsWith(prefix, ResponseControl.Escalate))
                 {
+                    _logger.LogDebug("BotWire: ESCALATE control word detected.");
+                    escalating = resolved = true;
                     yield return BotEvent.Escalated();
-                    yield return BotEvent.CollectContact();
-                    yield break;
+                    var body = ResponseControl.Body(text, newline, ResponseControl.Escalate);
+                    EmitDelta(body, answer);
+                    if (body.Length > 0)
+                        yield return BotEvent.TextChunk(body);
+                    continue; // keep streaming remaining body text
                 }
 
                 resolved = true;
                 string emit;
                 if (ResponseControl.StartsWith(prefix, ResponseControl.Answer))
                 {
+                    _logger.LogDebug("BotWire: ANSWER control word detected.");
                     emit = ResponseControl.Body(text, newline, ResponseControl.Answer);
                 }
                 else
                 {
-                    _logger.LogWarning("Stream prefix had no recognized control word; failing open as ANSWER.");
+                    _logger.LogWarning(
+                        "BotWire: stream prefix '{Prefix}' is not a recognized control word; failing open as ANSWER.",
+                        prefix.Length > 60 ? prefix[..60] : prefix);
                     emit = text;
                 }
 
@@ -170,36 +181,80 @@ public sealed class AnswerProvider : IAnswerProvider
             if (buffer.Length >= ResponseControl.ScanLimit)
             {
                 _logger.LogWarning(
-                    "No control word within {Limit} chars; failing open as ANSWER.", ResponseControl.ScanLimit);
+                    "BotWire: no control word in first {Limit} chars; buffer: '{Buffer}'; failing open as ANSWER.",
+                    ResponseControl.ScanLimit,
+                    text.Length > 80 ? text[..80] : text);
                 resolved = true;
-                var emit = text;
-                EmitDelta(emit, answer);
-                yield return BotEvent.TextChunk(emit);
+                EmitDelta(text, answer);
+                yield return BotEvent.TextChunk(text);
             }
+        }
+
+        // After stream: if ESCALATE was detected, either create ticket (contact known) or collect it.
+        if (escalating)
+        {
+            if (contact is not null)
+            {
+                _logger.LogDebug("BotWire: ESCALATE — contact already known, creating ticket immediately.");
+                var ticket = await _ticketGenerator.GenerateAsync(
+                    session, message, contact, cancellationToken);
+                await NotifyAsync(ticket, cancellationToken);
+                var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
+                yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
+                yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
+            }
+            else
+            {
+                _logger.LogDebug("BotWire: ESCALATE — contact unknown, emitting CollectContact.");
+                yield return BotEvent.CollectContact();
+            }
+            yield break;
         }
 
         // Stream ended before the control word was resolved: a short reply with no trailing newline.
         if (!resolved)
         {
-            var text = buffer.ToString();
+            var text    = buffer.ToString();
             var trimmed = text.TrimStart();
 
             if (ResponseControl.StartsWith(trimmed, ResponseControl.Escalate))
             {
+                _logger.LogDebug("BotWire: ESCALATE control word detected (no trailing newline).");
                 yield return BotEvent.Escalated();
-                yield return BotEvent.CollectContact();
+                var body = ResponseControl.Body(text, -1, ResponseControl.Escalate);
+                EmitDelta(body, answer);
+                if (body.Length > 0)
+                    yield return BotEvent.TextChunk(body);
+
+                if (contact is not null)
+                {
+                    _logger.LogDebug("BotWire: ESCALATE (no newline) — contact known, creating ticket immediately.");
+                    var ticket = await _ticketGenerator.GenerateAsync(
+                        session, message, contact, cancellationToken);
+                    await NotifyAsync(ticket, cancellationToken);
+                    var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
+                    yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
+                    yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
+                }
+                else
+                {
+                    yield return BotEvent.CollectContact();
+                }
                 yield break;
             }
 
             string emit;
             if (ResponseControl.StartsWith(trimmed, ResponseControl.Answer))
             {
+                _logger.LogDebug("BotWire: ANSWER control word detected (no trailing newline).");
                 emit = ResponseControl.Body(text, -1, ResponseControl.Answer);
             }
             else
             {
                 if (text.Length > 0)
-                    _logger.LogWarning("Stream ended with no recognized control word; failing open as ANSWER.");
+                    _logger.LogWarning(
+                        "BotWire: stream ended with no recognized control word; failing open as ANSWER. Response: '{Response}'",
+                        text.Length > 200 ? text[..200] : text);
                 emit = text;
             }
 
@@ -223,6 +278,16 @@ public sealed class AnswerProvider : IAnswerProvider
                     channel.ChannelType, ticket.TicketId);
             }
         }
+
+        if (_options.OnTicketCreated is not null)
+        {
+            try { await _options.OnTicketCreated(ticket); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "BotWire: OnTicketCreated callback threw for ticket {Id}.", ticket.TicketId);
+            }
+        }
     }
 
     private static void EmitDelta(string delta, StringBuilder answer)
@@ -236,11 +301,14 @@ public sealed class AnswerProvider : IAnswerProvider
         ConversationSession session,
         string userMessage)
     {
-        var messages = new List<ChatMessage>(session.History.Count + 2)
+        var messages = new List<ChatMessage>(session.History.Count + 3)
         {
             new(ChatRole.System, systemPrompt),
         };
         messages.AddRange(session.History);
+        // Injected just before the user turn so the LLM sees the constraint even in long conversations
+        messages.Add(new(ChatRole.System,
+            $"REMINDER: Your reply MUST start with {ResponseControl.Answer} or {ResponseControl.Escalate} alone on the first line. Nothing before it."));
         messages.Add(new ChatMessage(ChatRole.User, userMessage));
         return messages;
     }

@@ -42,6 +42,9 @@ public sealed record BotEvent
     /// <summary>Confirmed support ticket identifier. Populated when <see cref="Kind"/> is <see cref="BotEventKind.TicketConfirmed"/>.</summary>
     public string? TicketId { get; init; }
 
+    /// <summary>Customer-facing confirmation message. Populated when <see cref="Kind"/> is <see cref="BotEventKind.TicketConfirmed"/>.</summary>
+    public string? ConfirmationMessage { get; init; }
+
     /// <summary>Error message. Populated when <see cref="Kind"/> is <see cref="BotEventKind.Error"/>.</summary>
     public string? ErrorMessage { get; init; }
 
@@ -75,8 +78,9 @@ public sealed record BotEvent
 
     /// <summary>Creates a <see cref="BotEventKind.TicketConfirmed"/> event.</summary>
     /// <param name="ticketId">The identifier of the confirmed ticket.</param>
-    public static BotEvent TicketConfirmed(string ticketId) =>
-        new() { Kind = BotEventKind.TicketConfirmed, TicketId = ticketId };
+    /// <param name="confirmationMessage">Customer-facing message to display in the widget.</param>
+    public static BotEvent TicketConfirmed(string ticketId, string confirmationMessage) =>
+        new() { Kind = BotEventKind.TicketConfirmed, TicketId = ticketId, ConfirmationMessage = confirmationMessage };
 
     /// <summary>Creates a <see cref="BotEventKind.Error"/> event.</summary>
     /// <param name="message">A description of the error.</param>

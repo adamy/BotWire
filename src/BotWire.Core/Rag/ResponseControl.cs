@@ -31,12 +31,12 @@ internal static class ResponseControl
     public const string Escalate = "ESCALATE";
 
     /// <summary>
-    /// Maximum number of leading characters to inspect for a control word before failing open.
-    /// Sized to cover the longest control word (<see cref="Escalate"/> = 8 chars) plus a newline,
-    /// with headroom; the streaming path buffers until this limit when the model omits the
-    /// expected newline.
+    /// Maximum number of leading characters to buffer while waiting for a newline before failing
+    /// open as ANSWER. Sized to comfortably exceed the longest control word plus any whitespace
+    /// a model might emit before or after it on the first line, while staying short enough
+    /// that a slow or non-compliant model does not hold up the response stream for long.
     /// </summary>
-    public const int ScanLimit = 20;
+    public const int ScanLimit = 200;
 
     /// <summary>The result of parsing the control word from a full (non-streamed) response.</summary>
     /// <param name="Status">Resolved answer status.</param>

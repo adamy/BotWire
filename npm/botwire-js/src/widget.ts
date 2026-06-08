@@ -6,12 +6,16 @@ const STORAGE_KEY = 'botwire_session';
 type SseEvent =
   | { type: 'token';           value: string }
   | { type: 'collect_contact'                }
-  | { type: 'escalated';       ticketId: string }
+  | { type: 'escalated';       ticketId: string; message: string }
   | { type: 'blocked';         reason: string };
 
 // ── CSS ──────────────────────────────────────────────────────────────────────
 
-function buildCss(primary: string, position: string): string {
+function escapeCss(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function buildCss(primary: string, position: string, greeting: string): string {
   const isLeft = position === 'bottom-left';
   const side   = isLeft ? 'left' : 'right';
   return `
@@ -58,7 +62,7 @@ function buildCss(primary: string, position: string): string {
   scroll-behavior:smooth;
 }
 #messages:empty::before{
-  content:'How can we help you today?';
+  content:'${escapeCss(greeting)}';
   color:#94a3b8;font-size:13px;text-align:center;
   margin:auto;padding:32px 16px;
 }
@@ -118,12 +122,19 @@ function buildCss(primary: string, position: string): string {
   transition:border-color .15s;
 }
 #email-input:focus{border-color:${primary}}
+#contact-buttons{display:flex;gap:8px}
 #contact-submit{
-  background:${primary};color:#fff;border:none;border-radius:10px;
+  flex:1;background:${primary};color:#fff;border:none;border-radius:10px;
   padding:10px;cursor:pointer;font-size:14px;font-weight:500;
   transition:opacity .15s;
 }
 #contact-submit:hover{opacity:.88}
+#contact-cancel{
+  flex:1;background:#f1f5f9;color:#64748b;border:none;border-radius:10px;
+  padding:10px;cursor:pointer;font-size:14px;font-weight:500;
+  transition:background .15s;
+}
+#contact-cancel:hover{background:#e2e8f0}
 
 #ticket-card{
   margin:12px 12px 14px;padding:14px 16px;
@@ -154,6 +165,7 @@ class BotWireWidget extends HTMLElement {
   private sessionToken: string | null = null;
   private streaming      = false;
   private awaitingEmail  = false;
+  private ticketCreated  = false;
 
   // DOM refs — assigned in mount(), called before any interaction
   private panel!:     HTMLElement;
@@ -163,9 +175,10 @@ class BotWireWidget extends HTMLElement {
   private inputArea!: HTMLElement;
   private input!:     HTMLTextAreaElement;
   private sendBtn!:   HTMLButtonElement;
-  private contact!:   HTMLFormElement;
-  private emailIn!:   HTMLInputElement;
-  private ticket!:    HTMLElement;
+  private contact!:    HTMLFormElement;
+  private emailIn!:    HTMLInputElement;
+  private cancelBtn!:  HTMLButtonElement;
+  private ticket!:     HTMLElement;
 
   constructor() {
     super();
@@ -174,11 +187,19 @@ class BotWireWidget extends HTMLElement {
 
   // ── Attribute helpers ───────────────────────────────────────────────────────
 
-  private get endpoint():  string { return this.dataset['endpoint']     ?? '/support'; }
-  private get widgetTitle(): string { return this.dataset['title']      ?? 'Support'; }
-  private get primary():   string { return this.dataset['primaryColor'] ?? '#6366f1'; }
-  private get position():  string { return this.dataset['position']     ?? 'bottom-right'; }
-  private get publicKey(): string | undefined { return this.dataset['publicKey']; }
+  private get endpoint():         string           { return this.dataset['endpoint']         ?? '/support'; }
+  private get widgetTitle():      string           { return this.dataset['title']            ?? 'Support'; }
+  private get primary():          string           { return this.dataset['primaryColor']     ?? '#6366f1'; }
+  private get position():         string           { return this.dataset['position']         ?? 'bottom-right'; }
+  private get publicKey():        string|undefined { return this.dataset['publicKey']; }
+  private get placeholder():      string           { return this.dataset['placeholder']      ?? 'Type a message…'; }
+  private get contactPrompt():    string           { return this.dataset['contactPrompt']    ?? 'Please leave your email address so our team can follow up with you.'; }
+  private get emailPlaceholder(): string           { return this.dataset['emailPlaceholder'] ?? 'your@email.com'; }
+  private get sendLabel():        string           { return this.dataset['sendLabel']        ?? 'Send'; }
+  private get submitLabel():      string           { return this.dataset['submitLabel']      ?? 'Submit'; }
+  private get cancelLabel():      string           { return this.dataset['cancelLabel']      ?? 'Cancel'; }
+  private get cancelMessage():    string           { return this.dataset['cancelMessage']    ?? 'You have ended this conversation.'; }
+  private get greeting():         string           { return this.dataset['greeting']         ?? 'How can we help you today?'; }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -192,7 +213,7 @@ class BotWireWidget extends HTMLElement {
 
   private mount(): void {
     this.shadow.innerHTML = `
-<style>${buildCss(this.primary, this.position)}</style>
+<style>${buildCss(this.primary, this.position, this.greeting)}</style>
 <button id="bubble" aria-label="Open support chat" aria-expanded="false">${ICON_CHAT}</button>
 <div id="panel" hidden role="dialog" aria-label="${this.esc(this.widgetTitle)} support chat">
   <div id="header">
@@ -202,27 +223,31 @@ class BotWireWidget extends HTMLElement {
   <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
   <div id="typing" hidden aria-hidden="true"><span></span><span></span><span></span></div>
   <div id="input-area">
-    <textarea id="input" placeholder="Type a message…" rows="1" aria-label="Message input"></textarea>
-    <button id="send" type="button">Send</button>
+    <textarea id="input" placeholder="${this.esc(this.placeholder)}" rows="1" aria-label="Message input"></textarea>
+    <button id="send" type="button">${this.esc(this.sendLabel)}</button>
   </div>
   <form id="contact-form" hidden>
-    <p>Please leave your email address so our team can follow up with you.</p>
-    <input type="email" id="email-input" placeholder="your@email.com" required aria-label="Email address">
-    <button id="contact-submit" type="submit">Submit</button>
+    <p>${this.esc(this.contactPrompt)}</p>
+    <input type="email" id="email-input" placeholder="${this.esc(this.emailPlaceholder)}" required aria-label="Email address">
+    <div id="contact-buttons">
+      <button id="contact-submit" type="submit">${this.esc(this.submitLabel)}</button>
+      <button id="contact-cancel" type="button">${this.esc(this.cancelLabel)}</button>
+    </div>
   </form>
   <div id="ticket-card" hidden role="status"></div>
 </div>`;
 
-    this.panel    = this.q('#panel');
-    this.bubble   = this.q<HTMLButtonElement>('#bubble');
-    this.messages = this.q('#messages');
-    this.typing   = this.q('#typing');
+    this.panel     = this.q('#panel');
+    this.bubble    = this.q<HTMLButtonElement>('#bubble');
+    this.messages  = this.q('#messages');
+    this.typing    = this.q('#typing');
     this.inputArea = this.q('#input-area');
-    this.input    = this.q<HTMLTextAreaElement>('#input');
-    this.sendBtn  = this.q<HTMLButtonElement>('#send');
-    this.contact  = this.q<HTMLFormElement>('#contact-form');
-    this.emailIn  = this.q<HTMLInputElement>('#email-input');
-    this.ticket   = this.q('#ticket-card');
+    this.input     = this.q<HTMLTextAreaElement>('#input');
+    this.sendBtn   = this.q<HTMLButtonElement>('#send');
+    this.contact   = this.q<HTMLFormElement>('#contact-form');
+    this.emailIn   = this.q<HTMLInputElement>('#email-input');
+    this.cancelBtn = this.q<HTMLButtonElement>('#contact-cancel');
+    this.ticket    = this.q('#ticket-card');
 
     this.bubble.addEventListener('click', () => this.toggle());
     this.q('#close').addEventListener('click', () => this.close());
@@ -235,6 +260,7 @@ class BotWireWidget extends HTMLElement {
       e.preventDefault();
       this.handleContactSubmit();
     });
+    this.cancelBtn.addEventListener('click', () => this.handleContactCancel());
   }
 
   // ── Session init ────────────────────────────────────────────────────────────
@@ -296,6 +322,13 @@ class BotWireWidget extends HTMLElement {
     void this.stream('', email);
   }
 
+  private handleContactCancel(): void {
+    this.contact.hidden = true;
+    this.awaitingEmail  = false;
+    this.ticketCreated  = true;
+    this.appendMessage('sys', this.cancelMessage);
+  }
+
   private async stream(message: string, contactEmail?: string): Promise<void> {
     if (this.streaming) return;
     this.streaming    = true;
@@ -353,12 +386,15 @@ class BotWireWidget extends HTMLElement {
               this.inputArea.hidden = true;
               this.contact.hidden   = false;
               this.awaitingEmail    = true;
-              this.emailIn.focus();
+              // rAF: wait for layout reflow so messages area has shrunk before scrolling
+              requestAnimationFrame(() => { this.scrollBottom(); this.emailIn.focus(); });
               break;
 
             case 'escalated':
+              this.ticketCreated      = true;
               this.ticket.hidden      = false;
-              this.ticket.textContent = `✓ Support ticket ${evt.ticketId} created — we'll be in touch soon.`;
+              this.ticket.textContent = evt.message;
+              this.inputArea.hidden   = true;
               break;
 
             case 'blocked':
@@ -374,7 +410,7 @@ class BotWireWidget extends HTMLElement {
     } finally {
       this.typing.hidden    = true;
       this.streaming        = false;
-      if (!this.awaitingEmail) {
+      if (!this.awaitingEmail && !this.ticketCreated) {
         this.sendBtn.disabled = false;
         if (!this.panel.hidden) this.input.focus();
       }

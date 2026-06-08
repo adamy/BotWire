@@ -91,9 +91,11 @@ public static class BotWireServiceCollectionExtensions
         // ── Answer provider (RAG, Mode A) ───────────────────────────────────────
         services.AddBotWireAnswerProvider(o =>
         {
-            o.DocumentPaths        = [.. opts.Documents];
-            o.SystemPromptPreamble = opts.TopicDescription;
-            o.TicketLanguage       = opts.TicketLanguage;
+            o.DocumentPaths           = [.. opts.Documents];
+            o.SystemPromptPreamble    = opts.TopicDescription;
+            o.TicketLanguage          = opts.TicketLanguage;
+            o.TicketConfirmedMessage  = opts.TicketConfirmedMessage;
+            o.OnTicketCreated         = opts.OnTicketCreated;
         });
 
         // ── Session tokens ──────────────────────────────────────────────────────

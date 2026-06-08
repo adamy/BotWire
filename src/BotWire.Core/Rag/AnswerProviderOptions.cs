@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using System.ComponentModel.DataAnnotations;
+using BotWire.Core.Models;
 
 namespace BotWire.Core.Rag;
 
@@ -50,4 +51,25 @@ public sealed class AnswerProviderOptions
     [Required]
     [MinLength(1)]
     public string TicketLanguage { get; set; } = "English";
+
+    /// <summary>
+    /// Message shown to the customer in the widget after a support ticket is confirmed.
+    /// Use <c>{ticketId}</c> as a placeholder for the ticket identifier.
+    /// Defaults to <c>"✓ Support ticket {ticketId} created — we'll be in touch soon."</c>.
+    /// </summary>
+    [Required]
+    [MinLength(1)]
+    public string TicketConfirmedMessage { get; set; } =
+        "✓ Support ticket {ticketId} created — we'll be in touch soon.";
+
+    /// <summary>
+    /// Optional async callback invoked after a support ticket is created and all
+    /// <see cref="INotificationChannel"/> dispatches have completed (or failed).
+    /// Use this to integrate ticket creation into the host application — e.g. write to a
+    /// database, push to a queue, or update a CRM — without implementing a full
+    /// <see cref="INotificationChannel"/>.
+    /// Exceptions thrown by this callback are caught, logged, and swallowed so that a
+    /// failing host callback does not surface an error to the end user.
+    /// </summary>
+    public Func<SupportTicket, Task>? OnTicketCreated { get; set; }
 }
