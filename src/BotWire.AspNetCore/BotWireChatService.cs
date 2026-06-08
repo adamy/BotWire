@@ -144,6 +144,7 @@ internal sealed class BotWireChatService
         string accumulatedText,
         bool escalationStarted,
         string? confirmedTicketId,
+        bool failedOpen = false,
         CancellationToken ct = default)
     {
         var session = prep.Session!;
@@ -163,6 +164,7 @@ internal sealed class BotWireChatService
                 History = updatedHistory,
                 EscalationPending = false,
                 EscalationTriggerMessage = null,
+                ConsecutiveNoControlWordCount = 0,
             };
         }
         else if (escalationStarted)
@@ -172,11 +174,16 @@ internal sealed class BotWireChatService
                 History = updatedHistory,
                 EscalationPending = true,
                 EscalationTriggerMessage = session.EscalationTriggerMessage ?? prep.UserMessage,
+                ConsecutiveNoControlWordCount = 0,
             };
         }
         else
         {
-            updatedSession = session with { History = updatedHistory };
+            updatedSession = session with
+            {
+                History = updatedHistory,
+                ConsecutiveNoControlWordCount = failedOpen ? session.ConsecutiveNoControlWordCount + 1 : 0,
+            };
         }
 
         return _sessions.SaveAsync(prep.Token!, updatedSession, ct);
@@ -285,14 +292,20 @@ internal sealed class BotWireChatService
                 History = updatedHistory,
                 EscalationPending = true,
                 EscalationTriggerMessage = session.EscalationTriggerMessage ?? message,
+                ConsecutiveNoControlWordCount = 0,
             },
             AnswerStatus.TicketCreated => session with
             {
                 History = updatedHistory,
                 EscalationPending = false,
                 EscalationTriggerMessage = null,
+                ConsecutiveNoControlWordCount = 0,
             },
-            _ => session with { History = updatedHistory },
+            _ => session with
+            {
+                History = updatedHistory,
+                ConsecutiveNoControlWordCount = result.FailedOpen ? session.ConsecutiveNoControlWordCount + 1 : 0,
+            },
         };
 
         await _sessions.SaveAsync(token, updatedSession, ct);

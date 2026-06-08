@@ -86,6 +86,20 @@ public sealed class AnswerProvider : IAnswerProvider
             return new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId);
         }
 
+        if (session.ConsecutiveNoControlWordCount >= _options.FailOpenEscalateThreshold)
+        {
+            var needsHuman = await TriageEscalationAsync(session, message, cancellationToken);
+            if (needsHuman)
+            {
+                _logger.LogInformation(
+                    "BotWire: auto-triage after {Count} fail-open turns — escalating.",
+                    session.ConsecutiveNoControlWordCount);
+                return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage, FailedOpen: false);
+            }
+            _logger.LogInformation(
+                "BotWire: auto-triage after {Count} fail-open turns — no escalation needed, continuing.",
+                session.ConsecutiveNoControlWordCount);
+        }
 
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
@@ -96,7 +110,7 @@ public sealed class AnswerProvider : IAnswerProvider
         if (!parsed.Recognized)
             _logger.LogWarning("LLM response had no recognized control word; failing open as ANSWER.");
 
-        return new AnswerResult(parsed.Status, parsed.Message);
+        return new AnswerResult(parsed.Status, parsed.Message, FailedOpen: !parsed.Recognized);
     }
 
     /// <inheritdoc/>
@@ -119,6 +133,37 @@ public sealed class AnswerProvider : IAnswerProvider
             yield break;
         }
 
+        if (session.ConsecutiveNoControlWordCount >= _options.FailOpenEscalateThreshold)
+        {
+            var needsHuman = await TriageEscalationAsync(session, message, cancellationToken);
+            if (needsHuman)
+            {
+                _logger.LogInformation(
+                    "BotWire: auto-triage after {Count} fail-open turns — escalating.",
+                    session.ConsecutiveNoControlWordCount);
+                var autoMsg = _options.AutoEscalationMessage;
+                if (!string.IsNullOrEmpty(autoMsg))
+                    yield return BotEvent.TextChunk(autoMsg);
+                if (contact is not null)
+                {
+                    var ticket = await _ticketGenerator.GenerateAsync(
+                        session, message, contact, cancellationToken);
+                    await NotifyAsync(ticket, cancellationToken);
+                    var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
+                    yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
+                    yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
+                }
+                else
+                {
+                    yield return BotEvent.CollectContact();
+                }
+                yield break;
+            }
+            _logger.LogInformation(
+                "BotWire: auto-triage after {Count} fail-open turns — no escalation needed, continuing.",
+                session.ConsecutiveNoControlWordCount);
+        }
+
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
 
@@ -126,13 +171,18 @@ public sealed class AnswerProvider : IAnswerProvider
         var answer      = new StringBuilder();
         var resolved    = false; // once true, the control-word decision is made and deltas pass through
         var escalating  = false; // true once ESCALATE control word detected
+        var failedOpen  = false; // true when no control word found; triggers stronger reminder next turn
 
         await foreach (var delta in _chat.ChatStreamingAsync(messages, cancellationToken))
         {
             if (resolved)
             {
-                answer.Append(delta);
-                yield return BotEvent.TextChunk(delta);
+                // After ESCALATE, the LLM body is internal reasoning — not shown to the user.
+                if (!escalating)
+                {
+                    answer.Append(delta);
+                    yield return BotEvent.TextChunk(delta);
+                }
                 continue;
             }
 
@@ -149,11 +199,7 @@ public sealed class AnswerProvider : IAnswerProvider
                     _logger.LogDebug("BotWire: ESCALATE control word detected.");
                     escalating = resolved = true;
                     yield return BotEvent.Escalated();
-                    var body = ResponseControl.Body(text, newline, ResponseControl.Escalate);
-                    EmitDelta(body, answer);
-                    if (body.Length > 0)
-                        yield return BotEvent.TextChunk(body);
-                    continue; // keep streaming remaining body text
+                    continue; // LLM body after ESCALATE is internal reasoning, not shown to user
                 }
 
                 resolved = true;
@@ -168,6 +214,7 @@ public sealed class AnswerProvider : IAnswerProvider
                     _logger.LogWarning(
                         "BotWire: stream prefix '{Prefix}' is not a recognized control word; failing open as ANSWER.",
                         prefix.Length > 60 ? prefix[..60] : prefix);
+                    failedOpen = true;
                     emit = text;
                 }
 
@@ -184,7 +231,8 @@ public sealed class AnswerProvider : IAnswerProvider
                     "BotWire: no control word in first {Limit} chars; buffer: '{Buffer}'; failing open as ANSWER.",
                     ResponseControl.ScanLimit,
                     text.Length > 80 ? text[..80] : text);
-                resolved = true;
+                resolved   = true;
+                failedOpen = true;
                 EmitDelta(text, answer);
                 yield return BotEvent.TextChunk(text);
             }
@@ -221,10 +269,7 @@ public sealed class AnswerProvider : IAnswerProvider
             {
                 _logger.LogDebug("BotWire: ESCALATE control word detected (no trailing newline).");
                 yield return BotEvent.Escalated();
-                var body = ResponseControl.Body(text, -1, ResponseControl.Escalate);
-                EmitDelta(body, answer);
-                if (body.Length > 0)
-                    yield return BotEvent.TextChunk(body);
+                // LLM body after ESCALATE is internal reasoning, not shown to user.
 
                 if (contact is not null)
                 {
@@ -255,6 +300,7 @@ public sealed class AnswerProvider : IAnswerProvider
                     _logger.LogWarning(
                         "BotWire: stream ended with no recognized control word; failing open as ANSWER. Response: '{Response}'",
                         text.Length > 200 ? text[..200] : text);
+                failedOpen = true;
                 emit = text;
             }
 
@@ -263,7 +309,7 @@ public sealed class AnswerProvider : IAnswerProvider
                 yield return BotEvent.TextChunk(emit);
         }
 
-        yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, answer.ToString()));
+        yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, answer.ToString(), FailedOpen: failedOpen));
     }
 
     private async Task NotifyAsync(SupportTicket ticket, CancellationToken ct)
@@ -290,6 +336,22 @@ public sealed class AnswerProvider : IAnswerProvider
         }
     }
 
+    private async Task<bool> TriageEscalationAsync(
+        ConversationSession session,
+        string currentMessage,
+        CancellationToken ct)
+    {
+        var messages = new List<ChatMessage>(session.History.Count + 2);
+        messages.AddRange(session.History);
+        messages.Add(new(ChatRole.User, currentMessage));
+        messages.Add(new(ChatRole.System,
+            "Based only on the conversation above: does the customer have a problem that requires " +
+            "a human agent (needs account access, order data, or has explicitly asked to speak to a person)? " +
+            "Reply with exactly one word: YES or NO."));
+        var raw = await _chat.ChatAsync(messages, ct);
+        return raw.Trim().StartsWith("YES", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void EmitDelta(string delta, StringBuilder answer)
     {
         if (delta.Length > 0)
@@ -306,9 +368,18 @@ public sealed class AnswerProvider : IAnswerProvider
             new(ChatRole.System, systemPrompt),
         };
         messages.AddRange(session.History);
-        // Injected just before the user turn so the LLM sees the constraint even in long conversations
-        messages.Add(new(ChatRole.System,
-            $"REMINDER: Your reply MUST start with {ResponseControl.Answer} or {ResponseControl.Escalate} alone on the first line. Nothing before it."));
+        // Injected just before the user turn — escalates to a critical warning if recent turns
+        // had no control word, since the model is clearly drifting.
+        var reminder = session.ConsecutiveNoControlWordCount >= 3
+            ? $"CRITICAL ERROR: Your last {session.ConsecutiveNoControlWordCount} replies were ALL missing the required control word. " +
+              $"The application is broken. You MUST start your reply with {ResponseControl.Answer} or " +
+              $"{ResponseControl.Escalate} alone on the very first line — nothing before it, absolutely no exceptions."
+            : session.ConsecutiveNoControlWordCount > 0
+            ? $"CRITICAL ERROR: Your previous reply was missing the required control word. " +
+              $"The application broke. You MUST start your reply with {ResponseControl.Answer} or " +
+              $"{ResponseControl.Escalate} alone on the very first line — nothing before it, no exceptions."
+            : $"REMINDER: Your reply MUST start with {ResponseControl.Answer} or {ResponseControl.Escalate} alone on the first line. Nothing before it.";
+        messages.Add(new(ChatRole.System, reminder));
         messages.Add(new ChatMessage(ChatRole.User, userMessage));
         return messages;
     }

@@ -21,4 +21,8 @@ namespace BotWire.Core.Models;
 /// <summary>The outcome of a bot answer attempt.</summary>
 /// <param name="Status">Whether the bot answered or needs to escalate.</param>
 /// <param name="Message">The bot's response text.</param>
-public sealed record AnswerResult(AnswerStatus Status, string Message);
+/// <param name="FailedOpen">
+/// True when no ANSWER / ESCALATE control word was found and the provider fell back to treating
+/// the response as an ANSWER. The next turn should inject a stricter reminder.
+/// </param>
+public sealed record AnswerResult(AnswerStatus Status, string Message, bool FailedOpen = false);

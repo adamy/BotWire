@@ -63,6 +63,21 @@ public sealed class AnswerProviderOptions
         "✓ Support ticket {ticketId} created — we'll be in touch soon.";
 
     /// <summary>
+    /// Message streamed to the customer when the bot automatically escalates after
+    /// <c>FailOpenEscalateThreshold</c> consecutive control-word failures. Set to an empty
+    /// string to show no message before the contact form. Defaults to
+    /// <c>"Let me connect you with our support team."</c>.
+    /// </summary>
+    public string AutoEscalationMessage { get; set; } =
+        "Let me connect you with our support team.";
+
+    /// <summary>
+    /// Number of consecutive fail-open turns (no control word) that triggers automatic
+    /// escalation triage. Defaults to <c>3</c>.
+    /// </summary>
+    public int FailOpenEscalateThreshold { get; set; } = 3;
+
+    /// <summary>
     /// Optional async callback invoked after a support ticket is created and all
     /// <see cref="INotificationChannel"/> dispatches have completed (or failed).
     /// Use this to integrate ticket creation into the host application — e.g. write to a

@@ -33,9 +33,15 @@ namespace BotWire.Core.Models;
 /// When non-null and <see cref="ContactInfo.Email"/> is set, ticket escalation can proceed
 /// without the user needing to re-enter their email.
 /// </param>
+/// <param name="ConsecutiveNoControlWordCount">
+/// Number of consecutive LLM responses that contained no ANSWER / ESCALATE control word and
+/// failed open. Used to inject escalating per-turn reminders and to trigger auto-triage after
+/// a configurable threshold.
+/// </param>
 public sealed record ConversationSession(
     List<ChatMessage> History,
     DateTimeOffset LastActivity,
     bool EscalationPending = false,
     string? EscalationTriggerMessage = null,
-    ContactInfo? KnownUser = null);
+    ContactInfo? KnownUser = null,
+    int ConsecutiveNoControlWordCount = 0);
