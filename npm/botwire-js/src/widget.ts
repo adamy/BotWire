@@ -281,6 +281,7 @@ class BotWireWidget extends HTMLElement {
   // ── Panel open/close ────────────────────────────────────────────────────────
 
   private toggle(): void {
+    console.log('[BotWire] toggle — panel.hidden:', this.panel.hidden, 'ticketCreated:', this.ticketCreated);
     if (this.panel.hidden) {
       this.open();
     } else if (this.ticketCreated) {
@@ -292,6 +293,7 @@ class BotWireWidget extends HTMLElement {
   }
 
   private open(): void {
+    console.log('[BotWire] open — ticketCreated:', this.ticketCreated);
     if (this.ticketCreated) this.resetConversation();
     this.panel.hidden = false;
     this.bubble.innerHTML = ICON_CLOSE_CHAT;
@@ -301,6 +303,7 @@ class BotWireWidget extends HTMLElement {
   }
 
   private resetConversation(): void {
+    console.log('[BotWire] resetConversation called — ticketCreated:', this.ticketCreated, 'panel.hidden:', this.panel.hidden);
     this.messages.innerHTML = '';
     this.ticketCreated  = false;
     this.awaitingEmail  = false;
@@ -313,6 +316,7 @@ class BotWireWidget extends HTMLElement {
     this.sessionToken    = null;
     sessionStorage.removeItem(STORAGE_KEY);
     void this.initSession();
+    console.log('[BotWire] resetConversation done — inputArea.hidden:', this.inputArea.hidden);
   }
 
   private close(): void {
