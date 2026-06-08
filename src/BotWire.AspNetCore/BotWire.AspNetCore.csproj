@@ -27,6 +27,26 @@
     <EmbeddedResource Include="botwire.js" LogicalName="BotWire.AspNetCore.botwire.js" />
   </ItemGroup>
 
+  <!--
+    Rebuild the widget bundle whenever widget.ts changes.
+    Conditioned on net10.0 so it runs exactly once in a multi-targeted build.
+    Inputs/Outputs enables incremental build — skipped when widget.ts is older than botwire.js.
+  -->
+  <Target Name="BuildBotWireWidget"
+          BeforeTargets="Build"
+          Condition="'$(TargetFramework)' == 'net10.0'"
+          Inputs="$(MSBuildThisFileDirectory)..\..\npm\botwire-js\src\widget.ts"
+          Outputs="$(MSBuildThisFileDirectory)botwire.js">
+    <Message Text="BotWire: building widget..." Importance="high" />
+    <Exec Command="npm install"
+          WorkingDirectory="$(MSBuildThisFileDirectory)..\..\npm\botwire-js"
+          Condition="!Exists('$(MSBuildThisFileDirectory)..\..\npm\botwire-js\node_modules')" />
+    <Exec Command="npm run build"
+          WorkingDirectory="$(MSBuildThisFileDirectory)..\..\npm\botwire-js" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\..\npm\botwire-js\dist\botwire.js"
+          DestinationFiles="$(MSBuildThisFileDirectory)botwire.js" />
+  </Target>
+
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>BotWire.AspNetCore.Tests</_Parameter1>

@@ -283,17 +283,36 @@ class BotWireWidget extends HTMLElement {
   private toggle(): void {
     if (this.panel.hidden) {
       this.open();
+    } else if (this.ticketCreated) {
+      this.resetConversation();
+      this.input.focus();
     } else {
       this.close();
     }
   }
 
   private open(): void {
+    if (this.ticketCreated) this.resetConversation();
     this.panel.hidden = false;
     this.bubble.innerHTML = ICON_CLOSE_CHAT;
     this.bubble.setAttribute('aria-expanded', 'true');
     if (!this.awaitingEmail) this.input.focus();
     else this.emailIn.focus();
+  }
+
+  private resetConversation(): void {
+    this.messages.innerHTML = '';
+    this.ticketCreated  = false;
+    this.awaitingEmail  = false;
+    this.streaming      = false;
+    this.contact.hidden  = true;
+    this.ticket.hidden   = true;
+    this.inputArea.hidden = false;
+    this.sendBtn.disabled = false;
+    this.emailIn.value   = '';
+    this.sessionToken    = null;
+    sessionStorage.removeItem(STORAGE_KEY);
+    void this.initSession();
   }
 
   private close(): void {
