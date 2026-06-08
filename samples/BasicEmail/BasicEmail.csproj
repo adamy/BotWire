@@ -10,4 +10,8 @@
     <ProjectReference Include="..\..\src\BotWire.Channels.Email\BotWire.Channels.Email.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="docs\faq.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
