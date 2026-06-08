@@ -93,6 +93,7 @@ public static class BotWireServiceCollectionExtensions
         {
             o.DocumentPaths        = [.. opts.Documents];
             o.SystemPromptPreamble = opts.TopicDescription;
+            o.TicketLanguage       = opts.TicketLanguage;
         });
 
         // ── Session tokens ──────────────────────────────────────────────────────

@@ -31,29 +31,33 @@ namespace BotWire.Core.Ticket;
 /// </summary>
 internal sealed class TicketGenerator
 {
-    private const string SystemPrompt =
+    private readonly ILlmChatClient _chat;
+    private readonly ILogger<TicketGenerator> _logger;
+    private readonly string _ticketPrefix;
+    private readonly string _systemPrompt;
+
+    /// <summary>Initializes a new instance.</summary>
+    /// <param name="chat">The LLM used to summarise the conversation.</param>
+    /// <param name="options">Provider options supplying the ticket ID prefix and language.</param>
+    /// <param name="logger">Logger for fallback diagnostics.</param>
+    public TicketGenerator(ILlmChatClient chat, IOptions<AnswerProviderOptions> options, ILogger<TicketGenerator> logger)
+    {
+        _chat = chat;
+        _ticketPrefix = options.Value.TicketPrefix;
+        _systemPrompt = BuildSystemPrompt(options.Value.TicketLanguage);
+        _logger = logger;
+    }
+
+    private static string BuildSystemPrompt(string ticketLanguage) =>
         "You are summarising a customer-support conversation so a human agent can pick it up.\n" +
+        $"Write the 'summary' and 'details' values in {ticketLanguage}, regardless of the language the customer used.\n" +
+        "Focus on what the customer needs — do not mention 'reference documents', 'knowledge base', or any bot internals.\n" +
         "Respond with ONLY a JSON object — no markdown, no explanation:\n" +
         "{\n" +
         "  \"summary\": \"<one-sentence summary of the customer's issue>\",\n" +
         "  \"details\": \"<full description including relevant context from the conversation>\",\n" +
         "  \"priority\": \"<low|medium|high|urgent>\"\n" +
         "}";
-
-    private readonly ILlmChatClient _chat;
-    private readonly ILogger<TicketGenerator> _logger;
-    private readonly string _ticketPrefix;
-
-    /// <summary>Initializes a new instance.</summary>
-    /// <param name="chat">The LLM used to summarise the conversation.</param>
-    /// <param name="options">Provider options supplying the ticket ID prefix.</param>
-    /// <param name="logger">Logger for fallback diagnostics.</param>
-    public TicketGenerator(ILlmChatClient chat, IOptions<AnswerProviderOptions> options, ILogger<TicketGenerator> logger)
-    {
-        _chat = chat;
-        _ticketPrefix = options.Value.TicketPrefix;
-        _logger = logger;
-    }
 
     /// <summary>
     /// Generates a <see cref="SupportTicket"/> by summarising the conversation via the LLM.
@@ -103,11 +107,11 @@ internal sealed class TicketGenerator
             CreatedAt: DateTimeOffset.UtcNow);
     }
 
-    private static List<ChatMessage> BuildMessages(ConversationSession session)
+    private List<ChatMessage> BuildMessages(ConversationSession session)
     {
         var messages = new List<ChatMessage>(session.History.Count + 1)
         {
-            new(ChatRole.System, SystemPrompt),
+            new(ChatRole.System, _systemPrompt),
         };
 
         foreach (var msg in session.History)

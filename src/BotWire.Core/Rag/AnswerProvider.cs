@@ -35,6 +35,8 @@ public sealed class AnswerProvider : IAnswerProvider
     private readonly ILlmChatClient _chat;
     private readonly IDocumentLoader _loader;
     private readonly TicketGenerator _ticketGenerator;
+    private readonly IReadOnlyList<INotificationChannel> _channels;
+    private readonly ISystemPromptBuilder _promptBuilder;
     private readonly AnswerProviderOptions _options;
     private readonly ILogger<AnswerProvider> _logger;
 
@@ -45,18 +47,24 @@ public sealed class AnswerProvider : IAnswerProvider
     /// <param name="chat">The chat LLM used to generate answers.</param>
     /// <param name="loader">Loader for the knowledge-base documents.</param>
     /// <param name="ticketGenerator">Generator for escalation support tickets.</param>
+    /// <param name="channels">Zero or more notification channels. Empty when email is not configured.</param>
+    /// <param name="promptBuilder">Builder for the grounding system prompt.</param>
     /// <param name="options">Bound provider options (document paths, preamble).</param>
     /// <param name="logger">Logger for fail-open diagnostics.</param>
     internal AnswerProvider(
         ILlmChatClient chat,
         IDocumentLoader loader,
         TicketGenerator ticketGenerator,
+        IEnumerable<INotificationChannel> channels,
+        ISystemPromptBuilder promptBuilder,
         IOptions<AnswerProviderOptions> options,
         ILogger<AnswerProvider> logger)
     {
         _chat = chat;
         _loader = loader;
         _ticketGenerator = ticketGenerator;
+        _channels = channels.ToList();
+        _promptBuilder = promptBuilder;
         _options = options.Value;
         _logger = logger;
     }
@@ -74,6 +82,7 @@ public sealed class AnswerProvider : IAnswerProvider
                 _logger.LogWarning("BotWire: EscalationPending is true but EscalationTriggerMessage is null; falling back to current message as ticket UserMessage.");
             var ticket = await _ticketGenerator.GenerateAsync(
                 session, session.EscalationTriggerMessage ?? message, contact, cancellationToken);
+            await NotifyAsync(ticket, cancellationToken);
             return new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId);
         }
 
@@ -102,6 +111,7 @@ public sealed class AnswerProvider : IAnswerProvider
                 _logger.LogWarning("BotWire: EscalationPending is true but EscalationTriggerMessage is null; falling back to current message as ticket UserMessage.");
             var ticket = await _ticketGenerator.GenerateAsync(
                 session, session.EscalationTriggerMessage ?? message, contact, cancellationToken);
+            await NotifyAsync(ticket, cancellationToken);
             yield return BotEvent.TicketConfirmed(ticket.TicketId);
             yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
             yield break;
@@ -201,6 +211,20 @@ public sealed class AnswerProvider : IAnswerProvider
         yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, answer.ToString()));
     }
 
+    private async Task NotifyAsync(SupportTicket ticket, CancellationToken ct)
+    {
+        foreach (var channel in _channels)
+        {
+            try { await channel.SendTicketAsync(ticket, ct); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "BotWire: notification channel '{Type}' failed for ticket {Id}.",
+                    channel.ChannelType, ticket.TicketId);
+            }
+        }
+    }
+
     private static void EmitDelta(string delta, StringBuilder answer)
     {
         if (delta.Length > 0)
@@ -232,7 +256,7 @@ public sealed class AnswerProvider : IAnswerProvider
             if (_systemPrompt is null)
             {
                 var documents = await _loader.LoadAsync([.. _options.DocumentPaths], cancellationToken);
-                _systemPrompt = SystemPromptBuilder.Build(documents, _options.SystemPromptPreamble);
+                _systemPrompt = _promptBuilder.Build(documents);
             }
         }
         finally

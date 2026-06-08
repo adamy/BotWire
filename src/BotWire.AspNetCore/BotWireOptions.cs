@@ -29,6 +29,14 @@ public sealed class BotWireOptions
     /// <summary>Reply sent when the user asks an off-topic question.</summary>
     public string OffTopicResponse { get; set; } = "I can only help with support topics.";
 
+    /// <summary>
+    /// Language the AI writes escalation ticket summary/details in (the email a human agent reads),
+    /// regardless of the customer's language. Free text passed to the model, e.g. <c>"English"</c>,
+    /// <c>"简体中文"</c>. Defaults to <c>"English"</c>. Customer-facing chat replies always match the
+    /// customer's own language and are not affected by this setting.
+    /// </summary>
+    public string TicketLanguage { get; set; } = "English";
+
     /// <summary>Paths to Markdown knowledge-base documents. At least one is required.</summary>
     public IList<string> Documents { get; set; } = [];
 

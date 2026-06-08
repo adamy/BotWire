@@ -29,8 +29,8 @@ public class TicketGeneratorTests
 {
     private static ConversationSession EmptySession() => new([], DateTimeOffset.UtcNow);
 
-    private static TicketGenerator CreateGenerator(ILlmChatClient chat, string prefix = "TKT") =>
-        new(chat, Options.Create(new AnswerProviderOptions { TicketPrefix = prefix }), NullLogger<TicketGenerator>.Instance);
+    private static TicketGenerator CreateGenerator(ILlmChatClient chat, string prefix = "TKT", string language = "English") =>
+        new(chat, Options.Create(new AnswerProviderOptions { TicketPrefix = prefix, TicketLanguage = language }), NullLogger<TicketGenerator>.Instance);
 
     [Fact]
     public async Task GenerateAsync_ValidJson_ParsesAllFields()
@@ -140,6 +140,32 @@ public class TicketGeneratorTests
         const string json = """{"summary":"s","details":"d","priority":"low"}""";
         var ticket = await CreateGenerator(new FakeChat(json), prefix: "ACME").GenerateAsync(EmptySession(), "t", null);
         Assert.StartsWith("ACME-", ticket.TicketId);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_TicketLanguage_InjectedIntoSystemPrompt()
+    {
+        const string json = """{"summary":"s","details":"d","priority":"low"}""";
+        var capture = new CapturingChat(json);
+        var gen = CreateGenerator(capture, language: "简体中文");
+
+        await gen.GenerateAsync(EmptySession(), "trigger", null);
+
+        var system = capture.LastMessages!.Single(m => m.Role == ChatRole.System).Content;
+        Assert.Contains("简体中文", system);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_DefaultLanguage_IsEnglish()
+    {
+        const string json = """{"summary":"s","details":"d","priority":"low"}""";
+        var capture = new CapturingChat(json);
+        var gen = CreateGenerator(capture);
+
+        await gen.GenerateAsync(EmptySession(), "trigger", null);
+
+        var system = capture.LastMessages!.Single(m => m.Role == ChatRole.System).Content;
+        Assert.Contains("English", system);
     }
 
     // ----- Test doubles -----

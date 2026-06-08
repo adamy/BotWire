@@ -40,4 +40,14 @@ public sealed class AnswerProviderOptions
     [Required]
     [MinLength(1)]
     public string TicketPrefix { get; set; } = "TKT";
+
+    /// <summary>
+    /// Language the AI writes the ticket summary and details in, regardless of the language the
+    /// customer used (the human agent reading the ticket gets a consistent language). Free text
+    /// passed to the model, e.g. <c>"English"</c>, <c>"简体中文"</c>, <c>"Français"</c>.
+    /// Defaults to <c>"English"</c>.
+    /// </summary>
+    [Required]
+    [MinLength(1)]
+    public string TicketLanguage { get; set; } = "English";
 }

@@ -33,6 +33,8 @@ public class AnswerProviderTests
             chat,
             new FakeDocumentLoader("doc content"),
             new TicketGenerator(ticketChat ?? chat, options, NullLogger<TicketGenerator>.Instance),
+            [],
+            new DefaultSystemPromptBuilder(options),
             options,
             NullLogger<AnswerProvider>.Instance);
     }

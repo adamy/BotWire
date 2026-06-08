@@ -17,6 +17,7 @@
 using BotWire.Core.Abstractions;
 using BotWire.Core.Rag;
 using BotWire.Core.Ticket;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -40,6 +41,11 @@ public static class AnswerProviderServiceCollectionExtensions
         services.AddOptions<AnswerProviderOptions>().Configure(configure).ValidateDataAnnotations().ValidateOnStart();
 
         services.AddSingleton<IDocumentLoader, DocumentLoader>();
+
+        // Default prompt builder; TryAdd lets a host register its own ISystemPromptBuilder
+        // (before or after AddBotWire) to fully replace the built-in prompt.
+        services.TryAddSingleton<ISystemPromptBuilder, DefaultSystemPromptBuilder>();
+
         services.AddSingleton<TicketGenerator>(sp => new TicketGenerator(
             sp.GetRequiredService<ILlmChatClient>(),
             sp.GetRequiredService<IOptions<AnswerProviderOptions>>(),
@@ -48,6 +54,8 @@ public static class AnswerProviderServiceCollectionExtensions
             sp.GetRequiredService<ILlmChatClient>(),
             sp.GetRequiredService<IDocumentLoader>(),
             sp.GetRequiredService<TicketGenerator>(),
+            sp.GetServices<INotificationChannel>(),
+            sp.GetRequiredService<ISystemPromptBuilder>(),
             sp.GetRequiredService<IOptions<AnswerProviderOptions>>(),
             sp.GetRequiredService<ILogger<AnswerProvider>>()));
 
