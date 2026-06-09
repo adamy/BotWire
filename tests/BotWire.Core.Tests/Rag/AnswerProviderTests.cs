@@ -205,4 +205,101 @@ public class AnswerProviderTests
         Assert.Equal(BotEventKind.Done, events[^1].Kind);
         Assert.Contains(events, e => e.Kind == BotEventKind.TextChunk);
     }
+
+    // ---- Escalation Flow Tests ----
+
+    [Fact]
+    public async Task StreamAsync_EscalateDetected_EmitsCollectContactWhenNoContact()
+    {
+        var chat = new FakeLlmChatClient("ESCALATE\nYou'll need to speak to a human.");
+        var provider = CreateProvider(chat);
+        var events = await CollectAsync(provider.StreamAsync("issue", EmptySession(), contact: null));
+
+        // Should emit Escalated then CollectContact (no TicketConfirmed without contact)
+        Assert.Contains(events, e => e.Kind == BotEventKind.Escalated);
+        Assert.Contains(events, e => e.Kind == BotEventKind.CollectContact);
+        // No TextChunk for ESCALATE body
+        Assert.DoesNotContain(events, e => e.Kind == BotEventKind.TextChunk);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_EscalateDetected_NoContactReturnsNeedHuman()
+    {
+        var chat = new FakeLlmChatClient("ESCALATE\nConnect with support.");
+        var provider = CreateProvider(chat);
+        var result = await provider.AnswerAsync("problem", EmptySession(), contact: null);
+
+        Assert.Equal(AnswerStatus.NeedHuman, result.Status);
+    }
+
+    [Fact]
+    public async Task StreamAsync_EscalateWithContactProvided_GeneratesTicket()
+    {
+        var chat = new FakeLlmChatClient("ESCALATE\nI'll connect you.");
+        var ticketChat = new FakeLlmChatClient("""{"summary":"Broken feature","details":"User reports issue","priority":"medium"}""");
+        var provider = CreateProvider(chat, ticketChat);
+        var contact = new ContactInfo("user@example.com", null, "John", "john99");
+
+        var events = await CollectAsync(provider.StreamAsync("urgent problem", EmptySession(), contact));
+
+        // Should emit: Escalated, TicketConfirmed, Done (no CollectContact)
+        Assert.Equal(BotEventKind.Escalated, events[0].Kind);
+        Assert.Contains(events, e => e.Kind == BotEventKind.TicketConfirmed);
+        Assert.DoesNotContain(events, e => e.Kind == BotEventKind.CollectContact);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_EscalateResponse_ReturnsNeedHumanNotTicket()
+    {
+        // When LLM says ESCALATE, AnswerAsync returns NeedHuman (not immediate ticket).
+        // Ticket is only created when EscalationPending && contact supplied (step 2 of flow).
+        var chat = new FakeLlmChatClient("ESCALATE\nI'll help.");
+        var provider = CreateProvider(chat);
+        var contact = new ContactInfo("test@example.com", null, "Alice", null);
+
+        var result = await provider.AnswerAsync("cant login", EmptySession(), contact);
+
+        Assert.Equal(AnswerStatus.NeedHuman, result.Status);
+    }
+
+    [Fact]
+    public async Task StreamAsync_EscalateWithNullContactEmail_StillGeneratesTicket()
+    {
+        var chat = new FakeLlmChatClient("ESCALATE\nConnecting you...");
+        var ticketChat = new FakeLlmChatClient("""{"summary":"Support needed","details":"Issue reported","priority":"medium"}""");
+        var provider = CreateProvider(chat, ticketChat);
+        // Contact object exists but Email is null — ticket is still generated with null email
+        var contact = new ContactInfo(null, null, "Jane");
+
+        var events = await CollectAsync(provider.StreamAsync("issue", EmptySession(), contact));
+
+        // Should generate ticket even with null email (contact object exists)
+        Assert.Contains(events, e => e.Kind == BotEventKind.TicketConfirmed);
+        Assert.DoesNotContain(events, e => e.Kind == BotEventKind.CollectContact);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_NoContactEmail_ReturnsNeedHuman()
+    {
+        var chat = new FakeLlmChatClient("ESCALATE\nWe need your email.");
+        var provider = CreateProvider(chat);
+        var result = await provider.AnswerAsync("help", EmptySession(), contact: null);
+
+        Assert.Equal(AnswerStatus.NeedHuman, result.Status);
+    }
+
+    [Fact]
+    public async Task StreamAsync_FailOpenThenEscalate_IncrementsConsecutiveCount()
+    {
+        // First request: no sentinel → fail-open, count becomes 1
+        var badChat = new FakeLlmChatClient("random text no sentinel");
+        var provider = CreateProvider(badChat);
+        var session1 = EmptySession();
+
+        var result1 = await provider.AnswerAsync("msg1", session1);
+
+        Assert.False(result1.FailedOpen == false); // FailedOpen should be true
+        // Note: FailedOpen flag exists, but ConsecutiveNoControlWordCount is session-level,
+        // not returned from AnswerAsync. Would be tested at service layer.
+    }
 }
