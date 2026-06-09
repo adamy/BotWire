@@ -16,6 +16,7 @@
 
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using BotWire.Core.Abstractions;
 using BotWire.Core.Enums;
 using BotWire.Core.Models;
@@ -342,8 +343,10 @@ public sealed class AnswerProvider : IAnswerProvider
         CancellationToken ct)
     {
         var messages = new List<ChatMessage>(session.History.Count + 2);
-        messages.AddRange(session.History);
-        messages.Add(new(ChatRole.User, currentMessage));
+        // Quote user messages so the triage LLM also treats them as data.
+        foreach (var m in session.History)
+            messages.Add(m.Role == ChatRole.User ? new(ChatRole.User, QuoteUserMessage(m.Content)) : m);
+        messages.Add(new(ChatRole.User, QuoteUserMessage(currentMessage)));
         messages.Add(new(ChatRole.System,
             "Based only on the conversation above: does the customer have a problem that requires " +
             "a human agent (needs account access, order data, or has explicitly asked to speak to a person)? " +
@@ -351,6 +354,9 @@ public sealed class AnswerProvider : IAnswerProvider
         var raw = await _chat.ChatAsync(messages, ct);
         return raw.Trim().StartsWith("YES", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string QuoteUserMessage(string content) =>
+        $"{{\"user_message\": {JsonSerializer.Serialize(content)}}}";
 
     private static void EmitDelta(string delta, StringBuilder answer)
     {
@@ -367,7 +373,9 @@ public sealed class AnswerProvider : IAnswerProvider
         {
             new(ChatRole.System, systemPrompt),
         };
-        messages.AddRange(session.History);
+        // Quote every user message so the LLM treats user content as data, not instructions.
+        foreach (var m in session.History)
+            messages.Add(m.Role == ChatRole.User ? new(ChatRole.User, QuoteUserMessage(m.Content)) : m);
         // Injected just before the user turn — escalates to a critical warning if recent turns
         // had no control word, since the model is clearly drifting.
         var reminder = session.ConsecutiveNoControlWordCount >= 3
@@ -380,7 +388,7 @@ public sealed class AnswerProvider : IAnswerProvider
               $"{ResponseControl.Escalate} alone on the very first line — nothing before it, no exceptions."
             : $"REMINDER: Your reply MUST start with {ResponseControl.Answer} or {ResponseControl.Escalate} alone on the first line. Nothing before it.";
         messages.Add(new(ChatRole.System, reminder));
-        messages.Add(new ChatMessage(ChatRole.User, userMessage));
+        messages.Add(new(ChatRole.User, QuoteUserMessage(userMessage)));
         return messages;
     }
 

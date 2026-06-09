@@ -19,6 +19,7 @@ using BotWire.Core.Enums;
 using BotWire.Core.Guard;
 using BotWire.Core.Models;
 using Microsoft.Extensions.Options;
+using NullPromptInjectionGuard = BotWire.Core.Guard.NullPromptInjectionGuard;
 
 namespace BotWire.AspNetCore.Tests;
 
@@ -43,6 +44,7 @@ public class BotWireChatServiceTests
             store,
             new FakeSessionTokenService(),
             piiBlocks ? FakePiiGuard.Block : FakePiiGuard.Allow,
+            NullPromptInjectionGuard.Instance,
             rateLimiter,
             Options.Create(new BotWireOptions { MaxMessageLength = maxMsg }),
             Options.Create(new PiiGuardOptions()));

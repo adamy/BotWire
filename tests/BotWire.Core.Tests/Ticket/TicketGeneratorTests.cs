@@ -47,16 +47,40 @@ public class TicketGeneratorTests
     }
 
     [Fact]
-    public async Task GenerateAsync_InvalidJson_FallbackToRawSummary()
+    public async Task GenerateAsync_InvalidJson_FallbackToTriggerMessage()
     {
-        const string bad = "not valid json at all";
-        var gen = CreateGenerator(new FakeChat(bad));
+        var gen = CreateGenerator(new FakeChat("I'm sorry to hear that. Let me help you."));
 
-        var ticket = await gen.GenerateAsync(EmptySession(), "trigger", null);
+        var ticket = await gen.GenerateAsync(EmptySession(), "My order has a faulty product", null);
 
-        Assert.Equal(bad, ticket.AiSummary);
-        Assert.Equal("parse error", ticket.Details);
+        Assert.Equal("My order has a faulty product", ticket.AiSummary);
+        Assert.Equal(string.Empty, ticket.Details);
         Assert.Equal(TicketPriority.Medium, ticket.SuggestedPriority);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_MarkdownFencedJson_Parsed()
+    {
+        const string fenced = "```json\n{\"summary\":\"Faulty product\",\"details\":\"Order has damage\",\"priority\":\"high\"}\n```";
+        var ticket = await CreateGenerator(new FakeChat(fenced)).GenerateAsync(EmptySession(), "trigger", null);
+
+        Assert.Equal("Faulty product", ticket.AiSummary);
+        Assert.Equal("Order has damage", ticket.Details);
+        Assert.Equal(TicketPriority.High, ticket.SuggestedPriority);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_FinalInstructionMessage_AppendedLast()
+    {
+        const string json = """{"summary":"s","details":"d","priority":"low"}""";
+        var capture = new CapturingChat(json);
+        var gen = CreateGenerator(capture);
+
+        await gen.GenerateAsync(EmptySession(), "trigger", null);
+
+        var last = capture.LastMessages!.Last();
+        Assert.Equal(ChatRole.User, last.Role);
+        Assert.Contains("Generate the JSON summary", last.Content);
     }
 
     [Fact]

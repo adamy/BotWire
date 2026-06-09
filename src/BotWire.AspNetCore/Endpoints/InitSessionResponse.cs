@@ -32,9 +32,14 @@ public sealed class InitSessionResponse
     [JsonPropertyName("needsName")]
     public bool NeedsName { get; }
 
-    public InitSessionResponse(string sessionToken, bool needsName)
+    /// <summary>Localised error message to display in the widget when a stream request fails.</summary>
+    [JsonPropertyName("errorMessage")]
+    public string ErrorMessage { get; }
+
+    public InitSessionResponse(string sessionToken, bool needsName, string errorMessage)
     {
-        SessionToken = sessionToken;
-        NeedsName    = needsName;
+        SessionToken  = sessionToken;
+        NeedsName     = needsName;
+        ErrorMessage  = errorMessage;
     }
 }

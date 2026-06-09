@@ -16,6 +16,7 @@
 
 using System.ComponentModel.DataAnnotations;
 using BotWire.Channels.Email;
+using BotWire.Core.Guard;
 using BotWire.Core.Models;
 
 namespace BotWire.AspNetCore;
@@ -67,6 +68,15 @@ public sealed class BotWireOptions
 
     /// <summary>CORS settings for BotWire API endpoints.</summary>
     public BotWireCorsOptions Cors { get; set; } = new();
+
+    /// <summary>Prompt injection detection settings. Enabled by default.</summary>
+    public PromptInjectionOptions PromptInjection { get; set; } = new();
+
+    /// <summary>
+    /// Message shown in the widget when a stream request fails.
+    /// Defaults to <c>"Something went wrong. Please try again."</c>.
+    /// </summary>
+    public string ErrorMessage { get; set; } = "Something went wrong. Please try again.";
 
     /// <summary>
     /// Message shown to the customer in the widget after a support ticket is confirmed.

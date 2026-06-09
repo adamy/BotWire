@@ -55,6 +55,7 @@ internal sealed class BotWireChatService
     private readonly IConversationStore _sessions;
     private readonly ISessionTokenService _tokens;
     private readonly IPiiGuard _piiGuard;
+    private readonly IPromptInjectionGuard _injectionGuard;
     private readonly IpRateLimiter _rateLimiter;
     private readonly IOptions<BotWireOptions> _options;
     private readonly IOptions<PiiGuardOptions> _piiOptions;
@@ -64,17 +65,19 @@ internal sealed class BotWireChatService
         IConversationStore sessions,
         ISessionTokenService tokens,
         IPiiGuard piiGuard,
+        IPromptInjectionGuard injectionGuard,
         IpRateLimiter rateLimiter,
         IOptions<BotWireOptions> options,
         IOptions<PiiGuardOptions> piiOptions)
     {
-        _answers   = answers;
-        _sessions  = sessions;
-        _tokens    = tokens;
-        _piiGuard  = piiGuard;
-        _rateLimiter = rateLimiter;
-        _options   = options;
-        _piiOptions = piiOptions;
+        _answers        = answers;
+        _sessions       = sessions;
+        _tokens         = tokens;
+        _piiGuard       = piiGuard;
+        _injectionGuard = injectionGuard;
+        _rateLimiter    = rateLimiter;
+        _options        = options;
+        _piiOptions     = piiOptions;
     }
 
     /// <summary>
@@ -255,6 +258,9 @@ internal sealed class BotWireChatService
 
         var pii = _piiGuard.Check(message);
         if (pii.Blocked)
+            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionToken ?? "", null, 400);
+
+        if (_injectionGuard.IsInjectionAttempt(message))
             return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionToken ?? "", null, 400);
 
         return null;

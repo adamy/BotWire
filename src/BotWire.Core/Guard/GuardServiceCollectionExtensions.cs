@@ -21,22 +21,24 @@ using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
-/// <summary>DI registration helpers for PII guard and IP rate limiter.</summary>
+/// <summary>DI registration helpers for PII guard, prompt injection guard, and IP rate limiter.</summary>
 public static class GuardServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers <see cref="IPiiGuard"/> and <see cref="IpRateLimiter"/> as singletons.
-    /// When <see cref="PiiGuardOptions.Enabled"/> is <see langword="false"/>, a no-op
-    /// <see cref="NullPiiGuard"/> is registered for <see cref="IPiiGuard"/>.
+    /// Registers <see cref="IPiiGuard"/>, <see cref="IPromptInjectionGuard"/>, and
+    /// <see cref="IpRateLimiter"/> as singletons. No-op null implementations are used when
+    /// the respective guard is disabled via options.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configurePii">Optional delegate to configure <see cref="PiiGuardOptions"/>.</param>
     /// <param name="configureRateLimit">Optional delegate to configure <see cref="RateLimiterOptions"/>.</param>
+    /// <param name="configureInjection">Optional delegate to configure <see cref="PromptInjectionOptions"/>.</param>
     /// <returns>The same <paramref name="services"/> instance for chaining.</returns>
     public static IServiceCollection AddBotWireGuard(
         this IServiceCollection services,
         Action<PiiGuardOptions>? configurePii = null,
-        Action<RateLimiterOptions>? configureRateLimit = null)
+        Action<RateLimiterOptions>? configureRateLimit = null,
+        Action<PromptInjectionOptions>? configureInjection = null)
     {
         var piiBuilder = services.AddOptions<PiiGuardOptions>();
         if (configurePii is not null) piiBuilder.Configure(configurePii);
@@ -59,6 +61,21 @@ public static class GuardServiceCollectionExtensions
         rlBuilder.ValidateDataAnnotations().ValidateOnStart();
 
         services.AddSingleton<IpRateLimiter>();
+
+        var injBuilder = services.AddOptions<PromptInjectionOptions>();
+        if (configureInjection is not null) injBuilder.Configure(configureInjection);
+
+        services.AddSingleton<IPromptInjectionGuard>(sp =>
+        {
+            var opts = sp.GetRequiredService<IOptions<PromptInjectionOptions>>();
+            var logger = sp.GetRequiredService<ILogger<PatternPromptInjectionGuard>>();
+            if (!opts.Value.Enabled)
+            {
+                logger.LogInformation("BotWire: PromptInjectionGuard disabled.");
+                return NullPromptInjectionGuard.Instance;
+            }
+            return new PatternPromptInjectionGuard(opts, logger);
+        });
 
         return services;
     }

@@ -162,10 +162,12 @@ const ICON_CLOSE_CHAT = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/
 class BotWireWidget extends HTMLElement {
   private readonly shadow: ShadowRoot;
 
-  private sessionToken: string | null = null;
+  private sessionToken:  string | null = null;
   private streaming      = false;
   private awaitingEmail  = false;
   private ticketCreated  = false;
+  private errorOccurred  = false;
+  private errorMessage   = 'Something went wrong. Please try again.';
 
   // DOM refs — assigned in mount(), called before any interaction
   private panel!:     HTMLElement;
@@ -269,9 +271,10 @@ class BotWireWidget extends HTMLElement {
     try {
       const resp = await this.post(`${this.endpoint}/session`, {});
       if (resp.ok) {
-        const data = await resp.json() as { sessionToken: string };
+        const data = await resp.json() as { sessionToken: string; errorMessage?: string };
         this.sessionToken = data.sessionToken;
         sessionStorage.setItem(STORAGE_KEY, data.sessionToken);
+        if (data.errorMessage) this.errorMessage = data.errorMessage;
       }
     } catch {
       // Will retry on first send
@@ -305,6 +308,7 @@ class BotWireWidget extends HTMLElement {
     this.ticketCreated  = false;
     this.awaitingEmail  = false;
     this.streaming      = false;
+    this.errorOccurred  = false;
     this.contact.hidden  = true;
     this.ticket.hidden   = true;
     this.inputArea.hidden = false;
@@ -316,6 +320,7 @@ class BotWireWidget extends HTMLElement {
   }
 
   private close(): void {
+    if (this.errorOccurred) this.resetConversation();
     this.panel.hidden = true;
     this.bubble.innerHTML = ICON_CHAT;
     this.bubble.setAttribute('aria-expanded', 'false');
@@ -366,7 +371,8 @@ class BotWireWidget extends HTMLElement {
 
       if (!resp.ok || !resp.body) {
         this.typing.hidden = true;
-        this.appendMessage('sys', 'Something went wrong. Please try again.');
+        this.errorOccurred = true;
+        this.appendMessage('sys', this.errorMessage);
         return;
       }
 

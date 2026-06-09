@@ -81,9 +81,14 @@ public static class BotWireServiceCollectionExtensions
             return sp.GetRequiredService<OpenAILlmClient>();
         });
 
-        // ── Guard (PII + rate limiter) ──────────────────────────────────────────
+        // ── Guard (PII + prompt injection + rate limiter) ───────────────────────
         services.AddBotWireGuard(
-            configureRateLimit: o => o.MaxRequestsPerIpPerMinute = opts.MaxRequestsPerIpPerMinute);
+            configureRateLimit: o => o.MaxRequestsPerIpPerMinute = opts.MaxRequestsPerIpPerMinute,
+            configureInjection: o =>
+            {
+                o.Enabled            = opts.PromptInjection.Enabled;
+                o.AdditionalPatterns = opts.PromptInjection.AdditionalPatterns;
+            });
 
         // ── Conversation store ──────────────────────────────────────────────────
         services.AddInMemoryConversationStore(o => o.SessionTtl = opts.SessionTtl);

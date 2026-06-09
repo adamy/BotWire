@@ -76,13 +76,14 @@ internal sealed class TicketGenerator
     {
         var messages = BuildMessages(session);
         var raw = await _chat.ChatAsync(messages, cancellationToken);
+        var json = StripMarkdownFences(raw);
 
         string summary, details;
         TicketPriority priority;
 
         try
         {
-            using var doc = JsonDocument.Parse(raw);
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             summary = root.TryGetProperty("summary", out var s) ? s.GetString() ?? string.Empty : string.Empty;
             details = root.TryGetProperty("details", out var d) ? d.GetString() ?? string.Empty : string.Empty;
@@ -90,9 +91,9 @@ internal sealed class TicketGenerator
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "BotWire: ticket JSON parse failed; using fallback summary.");
-            summary = raw ?? string.Empty;
-            details = "parse error";
+            _logger.LogWarning(ex, "BotWire: ticket JSON parse failed; using trigger message as fallback summary.");
+            summary = triggerMessage;
+            details = string.Empty;
             priority = TicketPriority.Medium;
         }
 
@@ -109,7 +110,7 @@ internal sealed class TicketGenerator
 
     private List<ChatMessage> BuildMessages(ConversationSession session)
     {
-        var messages = new List<ChatMessage>(session.History.Count + 1)
+        var messages = new List<ChatMessage>(session.History.Count + 2)
         {
             new(ChatRole.System, _systemPrompt),
         };
@@ -120,7 +121,19 @@ internal sealed class TicketGenerator
                 messages.Add(msg);
         }
 
+        // Explicit instruction prevents the LLM from continuing the conversation instead of summarising.
+        messages.Add(new(ChatRole.User, "This conversation has ended. Generate the JSON summary now."));
         return messages;
+    }
+
+    private static string StripMarkdownFences(string raw)
+    {
+        var trimmed = raw.Trim();
+        if (!trimmed.StartsWith("```", StringComparison.Ordinal)) return trimmed;
+        var nl = trimmed.IndexOf('\n');
+        if (nl < 0) return trimmed;
+        var end = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+        return end > nl ? trimmed[(nl + 1)..end].Trim() : trimmed;
     }
 
     private static TicketPriority ParsePriority(string? value) => value?.Trim().ToLowerInvariant() switch

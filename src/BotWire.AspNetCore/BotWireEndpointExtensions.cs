@@ -22,6 +22,7 @@ using BotWire.Core.Enums;
 using BotWire.Core.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 namespace Microsoft.AspNetCore.Builder;
 
@@ -55,7 +56,8 @@ public static class BotWireEndpointExtensions
     private static async Task<IResult> HandleInitSessionAsync(
         InitSessionRequest req,
         HttpContext context,
-        BotWireChatService service)
+        BotWireChatService service,
+        IOptions<BotWireOptions> options)
     {
         var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var (error, token, needsName) = await service.InitSessionAsync(req, ip, context.RequestAborted);
@@ -64,7 +66,7 @@ public static class BotWireEndpointExtensions
                 new ChatResponse(error.Status, error.Message, ""),
                 statusCode: error.HttpStatusCode);
         SetSessionCookie(context, token);
-        return Results.Json(new InitSessionResponse(token, needsName));
+        return Results.Json(new InitSessionResponse(token, needsName, options.Value.ErrorMessage));
     }
 
     // ── POST /support/chat ──────────────────────────────────────────────────────
