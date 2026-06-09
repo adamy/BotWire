@@ -6,6 +6,9 @@
     <Company>Object IT Limited</Company>
     <Description>Core abstractions and interfaces for the BotWire customer support bot library. Commercial licenses available for proprietary use.</Description>
     <PackageTags>botwire;chatbot;customer-support;bot</PackageTags>
+    <PackageProjectUrl>https://github.com/adamy/BotWire</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/adamy/BotWire</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <ItemGroup>

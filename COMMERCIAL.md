@@ -20,7 +20,7 @@ Specific terms (scope, pricing, support, updates) are agreed per customer. This 
 
 ## How to get in touch
 
-Open a [GitHub Discussion](https://github.com/ObjectIT-Limited/BotWire/discussions) with the label **commercial-license** and include:
+Open a [GitHub Discussion](https://github.com/adamy/BotWire/discussions) with the label **commercial-license** and include:
 
 - Your company name and contact email
 - How you plan to use BotWire (internal tool, SaaS, embedded in a product, etc.)

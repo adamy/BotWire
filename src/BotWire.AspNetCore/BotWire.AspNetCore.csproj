@@ -6,6 +6,9 @@
     <Company>Object IT Limited</Company>
     <Description>ASP.NET Core integration for BotWire — middleware, endpoints, and embedded chat widget hosting. Commercial licenses available for proprietary use.</Description>
     <PackageTags>botwire;chatbot;customer-support;aspnetcore;middleware</PackageTags>
+    <PackageProjectUrl>https://github.com/adamy/BotWire</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/adamy/BotWire</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <!-- Microsoft.Extensions.* 10.x packages predate net6.0 support; suppress their TFM warnings

@@ -37,4 +37,4 @@ If you need to use BotWire in a proprietary product without AGPL obligations, se
 
 ## Questions
 
-Open a [GitHub Discussion](https://github.com/ObjectIT-Limited/BotWire/discussions) for questions that are not bug reports or feature requests.
+Open a [GitHub Discussion](https://github.com/adamy/BotWire/discussions) for questions that are not bug reports or feature requests.
