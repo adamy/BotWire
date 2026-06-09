@@ -1,20 +1,77 @@
 # BotWire
 
-Embeddable AI customer-support bot for ASP.NET Core. Drop in `AddBotWire()` + `MapBotWire()` and you get chat, escalation, and ticket creation over HTTP/SSE.
+**Low-cost AI customer-support for your .NET website.** Drop one NuGet package into your ASP.NET Core app, point it at your FAQ, and ship a 24/7 support assistant that answers customers instantly — and quietly opens a support ticket the moment a human is actually needed.
+
+No SaaS seat fees. No per-conversation pricing. You bring your own OpenAI-compatible API key, so your only running cost is the model tokens — pennies per conversation with `gpt-4o-mini` or DeepSeek.
+
+![BotWire chat widget on a demo store](https://raw.githubusercontent.com/adamy/BotWire/main/docs/images/01-landing.png)
+
+## Why BotWire
+
+- **Cheap to run.** No platform subscription. Bring your own key; pay only for model tokens. Run it on `gpt-4o-mini`, DeepSeek, or any OpenAI-compatible endpoint to keep costs near zero.
+- **One package, two lines of code.** `AddBotWire()` + `MapBotWire()`. The chat widget, streaming endpoint, escalation logic, and ticket email are all included.
+- **Grounded in *your* docs.** Answers come only from the Markdown knowledge base you supply — no hallucinated policies, prices, or promises.
+- **Knows when to get a human.** When a customer needs account/order access or asks for a person, BotWire collects their contact details and raises a support ticket instead of guessing.
+- **Multilingual out of the box.** Replies in whatever language the customer writes in; you choose the language your team reads tickets in.
+- **Zero-dependency widget.** A ~12KB Web Component (Shadow DOM, no framework) you embed with a single `<script>` tag.
+- **Self-hostable & open.** AGPL-3.0. Your data and prompts stay in your app. Commercial licenses available if AGPL doesn't fit.
+
+## How it works
+
+**1. The customer asks — BotWire answers from your FAQ, streaming token-by-token.**
+
+![Bot answering a return-policy question](https://raw.githubusercontent.com/adamy/BotWire/main/docs/images/02-answer.png)
+
+**2. When the question needs a human, it collects contact details instead of guessing.**
+
+![Bot collecting customer email for escalation](https://raw.githubusercontent.com/adamy/BotWire/main/docs/images/03-collect-contact.png)
+
+**3. A support ticket is created and emailed to your team — the customer gets a confirmation.**
+
+![Support ticket confirmation in the widget](https://raw.githubusercontent.com/adamy/BotWire/main/docs/images/04-ticket.png)
 
 ## Quick start
+
+Install the package:
+
+```powershell
+dotnet add package BotWire.AspNetCore
+```
+
+Wire it up in `Program.cs`:
 
 ```csharp
 builder.Services.AddBotWire(opts =>
 {
     opts.TopicDescription = "Online store customer support";
     opts.Documents        = ["docs/faq.md"];
-    opts.ChatProvider     = new OpenAIProviderOptions { ApiKey = "sk-...", Model = "gpt-4o" };
+    opts.ChatProvider     = new OpenAIProviderOptions { ApiKey = "sk-...", Model = "gpt-4o-mini" };
+
+    // Optional: email tickets to your team when the bot escalates.
+    opts.Email = new EmailOptions
+    {
+        SmtpHost = "smtp.example.com", Port = 587,
+        FromAddress = "support-bot@example.com", ToAddress = "support@example.com",
+    };
 });
 
 app.UseCors();
 app.MapBotWire();
 ```
+
+Embed the widget on any page:
+
+```html
+<script src="/botwire/widget.js"></script>
+<botwire-widget
+    data-endpoint="/support"
+    data-title="Acme Support"
+    data-primary-color="#6366f1"
+    data-position="bottom-right">
+</botwire-widget>
+```
+
+That's it — the bot answers from `docs/faq.md` and raises tickets when it can't.
 
 ## Configuration reference
 
@@ -54,6 +111,18 @@ builder.Services.AddBotWire(opts =>
 ```
 
 Customer-facing chat replies are not affected — the bot always replies in the same language the customer wrote in.
+
+### React to created tickets
+
+Hook `OnTicketCreated` to push tickets into your own system (database, queue, CRM) in addition to (or instead of) email:
+
+```csharp
+opts.OnTicketCreated = async ticket =>
+{
+    await db.Tickets.AddAsync(ticket);
+    await db.SaveChangesAsync();
+};
+```
 
 ### Custom email template
 

@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using System.ComponentModel.DataAnnotations;
+using BotWire.Core.Abstractions;
 using BotWire.Core.Models;
 
 namespace BotWire.Core.Rag;
