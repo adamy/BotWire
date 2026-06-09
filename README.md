@@ -124,3 +124,8 @@ To exclude Mailpit tests from CI:
 ```powershell
 dotnet test --filter "Category!=RequiresMailpit"
 ```
+
+## License
+
+BotWire is available under the [AGPL v3](LICENSE).
+Commercial licenses are available for proprietary use — see [COMMERCIAL.md](COMMERCIAL.md).

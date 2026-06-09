@@ -40,15 +40,17 @@ public class ChatEndpointTests
     }
 
     [SkipIfNoApiKeyFact]
-    public async Task OffTopic_ReturnsNeedHuman()
+    public async Task OffTopic_ReturnsAnswered()
     {
+        // Off-topic messages → ANSWER (politely redirect), not ESCALATE.
+        // ESCALATE is reserved for support issues requiring human account/order access.
         await using var host = await BotWireTestHost.CreateAsync();
         var resp = await host.Client.PostAsJsonAsync("/support/chat",
             new ChatRequest { Message = "What is the current stock price of Apple?" });
         resp.EnsureSuccessStatusCode();
 
         var body = await resp.Content.ReadFromJsonAsync<ChatResponse>();
-        Assert.Equal("NeedHuman", body!.Status);
+        Assert.Equal("Answered", body!.Status);
     }
 
     /// <summary>

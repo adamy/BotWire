@@ -33,7 +33,7 @@ By submitting a contribution to this project, you grant the project maintainer t
 
 BotWire is licensed under the [GNU Affero General Public License v3](LICENSE) (AGPL-3.0). Contributions are accepted under the same license.
 
-If you need to use BotWire in a proprietary product without AGPL obligations, open a [GitHub Discussion](https://github.com/ObjectIT-Limited/BotWire/discussions) with the label **commercial-license**.
+If you need to use BotWire in a proprietary product without AGPL obligations, see [COMMERCIAL.md](COMMERCIAL.md).
 
 ## Questions
 
