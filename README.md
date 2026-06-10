@@ -194,6 +194,43 @@ To exclude Mailpit tests from CI:
 dotnet test --filter "Category!=RequiresMailpit"
 ```
 
+## AI provider & responsible use
+
+BotWire does **not** include or provide any AI model or API. You supply your own
+OpenAI-compatible API key and account, and your only AI cost is what that
+provider charges. When you deploy BotWire:
+
+- Customer messages and your knowledge-base content are sent to the third-party
+  LLM provider you configure. You are responsible for that provider's terms,
+  pricing, data-processing, and privacy obligations.
+- You are responsible for the AI-generated output shown to your customers, and
+  for disclosing AI use to end users where required by law.
+- BotWire grounds answers in your documents and includes prompt-injection
+  defenses, but language-model output can still be wrong. Do not rely on it for
+  decisions that require guaranteed accuracy without human review.
+
+### Customer PII
+
+Handling your customers' personal data is **your responsibility**. BotWire ships
+a best-effort PII guard (enabled by default) that **blocks** user messages
+matching common patterns — email addresses, phone numbers, and credit-card-like
+numbers — before they are sent to the AI provider. Add your own patterns via
+`PiiGuard.AdditionalPatterns`:
+
+```csharp
+builder.Services.AddBotWire(opts =>
+{
+    opts.PiiGuard.AdditionalPatterns.Add(@"\bACME-\d{6}\b"); // e.g. internal account numbers
+});
+```
+
+This guard is regex-based and **not exhaustive**: it will not catch every form
+of personal data, and it rejects rather than redacts. You must confirm, for your
+own jurisdiction and data, that no personal data you are not permitted to share
+is sent to your AI provider — for example by tuning the patterns, restricting
+your knowledge-base content, and choosing a provider whose data-processing terms
+meet your obligations.
+
 ## License
 
 BotWire is available under the [AGPL v3](LICENSE).

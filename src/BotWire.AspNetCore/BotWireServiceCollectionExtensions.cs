@@ -83,6 +83,12 @@ public static class BotWireServiceCollectionExtensions
 
         // ── Guard (PII + prompt injection + rate limiter) ───────────────────────
         services.AddBotWireGuard(
+            configurePii: o =>
+            {
+                o.Enabled            = opts.PiiGuard.Enabled;
+                o.RejectionMessage   = opts.PiiGuard.RejectionMessage;
+                o.AdditionalPatterns = opts.PiiGuard.AdditionalPatterns;
+            },
             configureRateLimit: o => o.MaxRequestsPerIpPerMinute = opts.MaxRequestsPerIpPerMinute,
             configureInjection: o =>
             {
