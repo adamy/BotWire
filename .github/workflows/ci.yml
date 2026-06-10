@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node (widget build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build (Release, warnings as errors)
+        run: dotnet build BotWire.slnx -c Release
+
+      - name: Test
+        run: dotnet test BotWire.slnx -c Release --no-build --filter "Category!=RequiresMailpit"

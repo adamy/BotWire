@@ -4,7 +4,7 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <Authors>Object IT Limited</Authors>
     <Company>Object IT Limited</Company>
-    <Description>Email channel adapter for BotWire — send and receive support tickets via SMTP/IMAP. Commercial licenses available for proprietary use.</Description>
+    <Description>Email notification channel for BotWire — delivers escalated support tickets to your team via SMTP (MailKit). Commercial licenses available for proprietary use.</Description>
     <PackageTags>botwire;chatbot;customer-support;email;smtp</PackageTags>
     <PackageProjectUrl>https://github.com/adamy/BotWire</PackageProjectUrl>
     <RepositoryUrl>https://github.com/adamy/BotWire</RepositoryUrl>
