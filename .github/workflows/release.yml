@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # create the GitHub Release
+  id-token: write   # NuGet Trusted Publishing (OIDC)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches VersionPrefix
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PREFIX=$(grep -oPm1 '(?<=<VersionPrefix>)[^<]+' Directory.Build.props)
+          if [ "$VERSION" != "$PREFIX" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match VersionPrefix $PREFIX in Directory.Build.props" >&2
+            exit 1
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node (widget build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build (Release, warnings as errors)
+        run: dotnet build BotWire.slnx -c Release
+
+      - name: Test
+        run: dotnet test BotWire.slnx -c Release --no-build --filter "Category!=RequiresMailpit"
+
+      - name: Pack
+        run: dotnet pack BotWire.slnx -c Release --no-build -o artifacts
+
+      - name: NuGet login (Trusted Publishing, OIDC)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          artifacts/*.nupkg artifacts/*.snupkg
+          --title "BotWire $GITHUB_REF_NAME"
+          --generate-notes
