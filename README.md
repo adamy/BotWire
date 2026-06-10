@@ -4,7 +4,7 @@
 
 No SaaS seat fees. No per-conversation pricing. You bring your own OpenAI-compatible API key, so your only running cost is the model tokens — pennies per conversation with `gpt-4o-mini` or DeepSeek.
 
-![BotWire chat widget on a demo store](https://raw.githubusercontent.com/adamy/BotWire/main/docs/images/01-landing.png)
+![BotWire chat widget on a demo store](docs/images/01-landing.png)
 
 ## Why BotWire
 
@@ -20,15 +20,15 @@ No SaaS seat fees. No per-conversation pricing. You bring your own OpenAI-compat
 
 **1. The customer asks — BotWire answers from your FAQ, streaming token-by-token.**
 
-![Bot answering a return-policy question](https://raw.githubusercontent.com/adamy/BotWire/main/docs/images/02-answer.png)
+![Bot answering a return-policy question](docs/images/02-answer.png)
 
 **2. When the question needs a human, it collects contact details instead of guessing.**
 
-![Bot collecting customer email for escalation](https://raw.githubusercontent.com/adamy/BotWire/main/docs/images/03-collect-contact.png)
+![Bot collecting customer email for escalation](docs/images/03-collect-contact.png)
 
 **3. A support ticket is created and emailed to your team — the customer gets a confirmation.**
 
-![Support ticket confirmation in the widget](https://raw.githubusercontent.com/adamy/BotWire/main/docs/images/04-ticket.png)
+![Support ticket confirmation in the widget](docs/images/04-ticket.png)
 
 ## Quick start
 
