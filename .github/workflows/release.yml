@@ -58,8 +58,10 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME"
-          artifacts/*.nupkg artifacts/*.snupkg
-          --title "BotWire $GITHUB_REF_NAME"
-          --generate-notes
+        run: |
+          args=(--title "BotWire $GITHUB_REF_NAME" --generate-notes)
+          notes="docs/release-notes/$GITHUB_REF_NAME.md"
+          if [ -f "$notes" ]; then
+            args+=(--notes-file "$notes")
+          fi
+          gh release create "$GITHUB_REF_NAME" artifacts/*.nupkg artifacts/*.snupkg "${args[@]}"
