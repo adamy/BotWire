@@ -28,9 +28,6 @@ public sealed class BotWireOptions
     [Required]
     public string TopicDescription { get; set; } = "";
 
-    /// <summary>Reply sent when the user asks an off-topic question.</summary>
-    public string OffTopicResponse { get; set; } = "I can only help with support topics.";
-
     /// <summary>
     /// Language the AI writes escalation ticket summary/details in (the email a human agent reads),
     /// regardless of the customer's language. Free text passed to the model, e.g. <c>"English"</c>,
@@ -59,12 +56,6 @@ public sealed class BotWireOptions
 
     /// <summary>Email notification settings. When <see langword="null"/>, ticket escalation is disabled.</summary>
     public EmailOptions? Email { get; set; }
-
-    /// <summary>Optional public API key required on chat requests.</summary>
-    public string? PublicKey { get; set; }
-
-    /// <summary>Optional admin API key for privileged operations.</summary>
-    public string? AdminKey { get; set; }
 
     /// <summary>CORS settings for BotWire API endpoints.</summary>
     public BotWireCorsOptions Cors { get; set; } = new();
