@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using BotWire.Core.Abstractions;
+using BotWire.Core.Conversation;
 using BotWire.Core.Enums;
 using BotWire.Core.Guard;
 using BotWire.Core.Models;
@@ -57,6 +58,7 @@ internal sealed class BotWireChatService
     private readonly IPiiGuard _piiGuard;
     private readonly IPromptInjectionGuard _injectionGuard;
     private readonly IpRateLimiter _rateLimiter;
+    private readonly ISummaryCompressor _compressor;
     private readonly IOptions<BotWireOptions> _options;
     private readonly IOptions<PiiGuardOptions> _piiOptions;
 
@@ -67,6 +69,7 @@ internal sealed class BotWireChatService
         IPiiGuard piiGuard,
         IPromptInjectionGuard injectionGuard,
         IpRateLimiter rateLimiter,
+        ISummaryCompressor compressor,
         IOptions<BotWireOptions> options,
         IOptions<PiiGuardOptions> piiOptions)
     {
@@ -76,6 +79,7 @@ internal sealed class BotWireChatService
         _piiGuard       = piiGuard;
         _injectionGuard = injectionGuard;
         _rateLimiter    = rateLimiter;
+        _compressor     = compressor;
         _options        = options;
         _piiOptions     = piiOptions;
     }
@@ -142,7 +146,7 @@ internal sealed class BotWireChatService
     public IAsyncEnumerable<BotEvent> StreamEventsAsync(StreamPrep prep, CancellationToken ct)
         => _answers.StreamAsync(prep.UserMessage!, prep.Session!, prep.Contact, ct);
 
-    public Task CommitStreamAsync(
+    public async Task CommitStreamAsync(
         StreamPrep prep,
         string accumulatedText,
         bool escalationStarted,
@@ -152,19 +156,22 @@ internal sealed class BotWireChatService
     {
         var session = prep.Session!;
 
-        var updatedHistory = new List<ChatMessage>(session.History);
+        var newTurn = new List<ChatMessage>(2);
         // Skip empty user messages (e.g. the placeholder sent when submitting the contact form)
         if (!string.IsNullOrWhiteSpace(prep.UserMessage))
-            updatedHistory.Add(new ChatMessage(ChatRole.User, prep.UserMessage!));
+            newTurn.Add(new ChatMessage(ChatRole.User, prep.UserMessage!));
         if (accumulatedText.Length > 0)
-            updatedHistory.Add(new ChatMessage(ChatRole.Assistant, accumulatedText));
+            newTurn.Add(new ChatMessage(ChatRole.Assistant, accumulatedText));
+
+        var (updatedFull, updatedSend) = await AppendAndCompressAsync(session, newTurn, ct);
 
         ConversationSession updatedSession;
         if (confirmedTicketId is not null)
         {
             updatedSession = session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 EscalationPending = false,
                 EscalationTriggerMessage = null,
                 ConsecutiveNoControlWordCount = 0,
@@ -174,7 +181,8 @@ internal sealed class BotWireChatService
         {
             updatedSession = session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 EscalationPending = true,
                 EscalationTriggerMessage = session.EscalationTriggerMessage ?? prep.UserMessage,
                 ConsecutiveNoControlWordCount = 0,
@@ -184,12 +192,13 @@ internal sealed class BotWireChatService
         {
             updatedSession = session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 ConsecutiveNoControlWordCount = failedOpen ? session.ConsecutiveNoControlWordCount + 1 : 0,
             };
         }
 
-        return _sessions.SaveAsync(prep.Token!, updatedSession, ct);
+        await _sessions.SaveAsync(prep.Token!, updatedSession, ct);
     }
 
     /// <summary>
@@ -212,13 +221,31 @@ internal sealed class BotWireChatService
             knownUser = new ContactInfo(email, null, name, username);
 
         var token   = _tokens.GenerateToken();
-        var session = new ConversationSession([], DateTimeOffset.UtcNow, KnownUser: knownUser);
+        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, KnownUser: knownUser);
         await _sessions.SaveAsync(token, session, ct);
 
         return (null, token, NeedsName: name is null);
     }
 
     // ── Private helpers ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Appends a completed turn to both histories, then runs summary compression on the
+    /// send-history. <see cref="ConversationSession.FullHistory"/> is never compressed —
+    /// ticket generation depends on the complete record.
+    /// </summary>
+    private async Task<(List<ChatMessage> Full, List<ChatMessage> Send)> AppendAndCompressAsync(
+        ConversationSession session, List<ChatMessage> newTurn, CancellationToken ct)
+    {
+        var updatedFull = new List<ChatMessage>(session.FullHistory);
+        updatedFull.AddRange(newTurn);
+
+        var updatedSend = new List<ChatMessage>(session.SendHistory);
+        updatedSend.AddRange(newTurn);
+        updatedSend = await _compressor.CompressAsync(updatedSend, _options.Value.SummaryInterval, ct);
+
+        return (updatedFull, updatedSend);
+    }
 
     /// <summary>
     /// Builds the <see cref="ContactInfo"/> passed to <see cref="IAnswerProvider"/>.
@@ -272,7 +299,7 @@ internal sealed class BotWireChatService
         if (sessionToken is null)
         {
             var token   = _tokens.GenerateToken();
-            var session = new ConversationSession([], DateTimeOffset.UtcNow);
+            var session = new ConversationSession([], [], DateTimeOffset.UtcNow);
             await _sessions.SaveAsync(token, session, ct);
             return (token, session);
         }
@@ -284,32 +311,37 @@ internal sealed class BotWireChatService
     private async Task SaveAnswerAsync(
         string token, ConversationSession session, string message, AnswerResult result, CancellationToken ct)
     {
-        var updatedHistory = new List<ChatMessage>(session.History)
+        var newTurn = new List<ChatMessage>(2)
         {
             new(ChatRole.User, message),
         };
         if (result.Status != AnswerStatus.TicketCreated)
-            updatedHistory.Add(new ChatMessage(ChatRole.Assistant, result.Message));
+            newTurn.Add(new ChatMessage(ChatRole.Assistant, result.Message));
+
+        var (updatedFull, updatedSend) = await AppendAndCompressAsync(session, newTurn, ct);
 
         var updatedSession = result.Status switch
         {
             AnswerStatus.NeedHuman => session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 EscalationPending = true,
                 EscalationTriggerMessage = session.EscalationTriggerMessage ?? message,
                 ConsecutiveNoControlWordCount = 0,
             },
             AnswerStatus.TicketCreated => session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 EscalationPending = false,
                 EscalationTriggerMessage = null,
                 ConsecutiveNoControlWordCount = 0,
             },
             _ => session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 ConsecutiveNoControlWordCount = result.FailedOpen ? session.ConsecutiveNoControlWordCount + 1 : 0,
             },
         };

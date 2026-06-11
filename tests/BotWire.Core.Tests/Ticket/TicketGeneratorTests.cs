@@ -27,7 +27,7 @@ namespace BotWire.Core.Tests.Ticket;
 
 public class TicketGeneratorTests
 {
-    private static ConversationSession EmptySession() => new([], DateTimeOffset.UtcNow);
+    private static ConversationSession EmptySession() => new([], [], DateTimeOffset.UtcNow);
 
     private static TicketGenerator CreateGenerator(ILlmChatClient chat, string prefix = "TKT", string language = "English") =>
         new(chat, Options.Create(new AnswerProviderOptions { TicketPrefix = prefix, TicketLanguage = language }), NullLogger<TicketGenerator>.Instance);
@@ -118,10 +118,13 @@ public class TicketGeneratorTests
         var capture = new CapturingChat(json);
         var gen = CreateGenerator(capture);
         var session = new ConversationSession(
-        [
-            new ChatMessage(ChatRole.System, "old system prompt"),
-            new ChatMessage(ChatRole.User, "hello"),
-        ], DateTimeOffset.UtcNow);
+            FullHistory:
+            [
+                new ChatMessage(ChatRole.System, "old system prompt"),
+                new ChatMessage(ChatRole.User, "hello"),
+            ],
+            SendHistory: [],
+            LastActivity: DateTimeOffset.UtcNow);
 
         await gen.GenerateAsync(session, "trigger", null);
 

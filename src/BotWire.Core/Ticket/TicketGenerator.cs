@@ -104,18 +104,18 @@ internal sealed class TicketGenerator
             Details: details,
             SuggestedPriority: priority,
             Contact: contact,
-            History: session.History.AsReadOnly(),
+            History: session.FullHistory.AsReadOnly(),
             CreatedAt: DateTimeOffset.UtcNow);
     }
 
     private List<ChatMessage> BuildMessages(ConversationSession session)
     {
-        var messages = new List<ChatMessage>(session.History.Count + 2)
+        var messages = new List<ChatMessage>(session.FullHistory.Count + 2)
         {
             new(ChatRole.System, _systemPrompt),
         };
 
-        foreach (var msg in session.History)
+        foreach (var msg in session.FullHistory)
         {
             if (msg.Role != ChatRole.System)
                 messages.Add(msg);

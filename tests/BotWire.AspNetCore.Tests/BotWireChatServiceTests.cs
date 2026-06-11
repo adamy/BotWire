@@ -46,6 +46,7 @@ public class BotWireChatServiceTests
             piiBlocks ? FakePiiGuard.Block : FakePiiGuard.Allow,
             NullPromptInjectionGuard.Instance,
             rateLimiter,
+            new FakeSummaryCompressor(),
             Options.Create(new BotWireOptions { MaxMessageLength = maxMsg }),
             Options.Create(new PiiGuardOptions()));
 
@@ -225,9 +226,12 @@ public class BotWireChatServiceTests
         await svc.CommitStreamAsync(prep, accumulatedText: "Hello!", escalationStarted: false, confirmedTicketId: null);
 
         var session = store.Get(prep.Token!);
-        Assert.Equal(2, session!.History.Count);
-        Assert.Equal("Hi",     session.History[0].Content);
-        Assert.Equal("Hello!", session.History[1].Content);
+        Assert.Equal(2, session!.FullHistory.Count);
+        Assert.Equal("Hi",     session.FullHistory[0].Content);
+        Assert.Equal("Hello!", session.FullHistory[1].Content);
+        // Send-history mirrors full-history when the pass-through compressor makes no change.
+        Assert.Equal(2, session.SendHistory.Count);
+        Assert.Equal("Hello!", session.SendHistory[1].Content);
         Assert.False(session.EscalationPending);
     }
 

@@ -17,7 +17,17 @@
 namespace BotWire.Core.Models;
 
 /// <summary>Holds the in-progress conversation state for a single user session.</summary>
-/// <param name="History">Ordered list of messages exchanged in this session.</param>
+/// <param name="FullHistory">
+/// Complete, never-trimmed record of the conversation. Used only for ticket generation and
+/// debugging — never sent to the answer LLM. Grows for the lifetime of the session.
+/// </param>
+/// <param name="SendHistory">
+/// The history actually sent to the answer LLM. Periodically compressed by
+/// <see cref="BotWire.Core.Conversation.ISummaryCompressor"/> into a single summary system
+/// message plus the most recent turns, bounding token cost on long conversations.
+/// When summary compression is disabled (<c>SummaryInterval == 0</c>) this mirrors
+/// <see cref="FullHistory"/> (subject to the store's message cap).
+/// </param>
 /// <param name="LastActivity">UTC timestamp of the most recent activity in this session.</param>
 /// <param name="EscalationPending">
 /// True when the bot has emitted an ESCALATE control word and is waiting for the user to
@@ -39,7 +49,8 @@ namespace BotWire.Core.Models;
 /// a configurable threshold.
 /// </param>
 public sealed record ConversationSession(
-    List<ChatMessage> History,
+    List<ChatMessage> FullHistory,
+    List<ChatMessage> SendHistory,
     DateTimeOffset LastActivity,
     bool EscalationPending = false,
     string? EscalationTriggerMessage = null,

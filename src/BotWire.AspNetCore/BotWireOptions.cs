@@ -48,6 +48,15 @@ public sealed class BotWireOptions
     /// <summary>Idle TTL for conversation sessions.</summary>
     public TimeSpan SessionTtl { get; set; } = TimeSpan.FromHours(2);
 
+    /// <summary>
+    /// Number of recent messages kept verbatim in the history sent to the answer LLM.
+    /// Once the send-history grows past twice this value, the oldest messages are folded into a
+    /// single LLM-generated summary system message to bound token cost on long conversations.
+    /// The full conversation is always preserved separately for ticket generation.
+    /// Defaults to 20. Set to 0 to disable summary compression (not recommended).
+    /// </summary>
+    public int SummaryInterval { get; set; } = 20;
+
     /// <summary>Chat completion provider. Required at startup.</summary>
     public OpenAIProviderOptions? ChatProvider { get; set; }
 

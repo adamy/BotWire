@@ -39,7 +39,7 @@ public class AnswerProviderTests
             NullLogger<AnswerProvider>.Instance);
     }
 
-    private static ConversationSession EmptySession() => new([], DateTimeOffset.UtcNow);
+    private static ConversationSession EmptySession() => new([], [], DateTimeOffset.UtcNow);
 
     private static async Task<List<BotEvent>> CollectAsync(IAsyncEnumerable<BotEvent> stream)
     {
@@ -157,6 +157,22 @@ public class AnswerProviderTests
         Assert.Equal(BotEventKind.CollectContact, events[1].Kind);
     }
 
+    [Fact]
+    public async Task AnswerAsync_SendsSendHistory_NotFullHistory()
+    {
+        var chat = new FakeLlmChatClient("ANSWER\nok");
+        var provider = CreateProvider(chat);
+        var session = new ConversationSession(
+            FullHistory: [new(ChatRole.User, "FULL-ONLY-MARKER")],
+            SendHistory: [new(ChatRole.User, "SEND-ONLY-MARKER")],
+            LastActivity: DateTimeOffset.UtcNow);
+
+        await provider.AnswerAsync("now", session);
+
+        Assert.Contains(chat.LastMessages!, m => m.Content.Contains("SEND-ONLY-MARKER"));
+        Assert.DoesNotContain(chat.LastMessages!, m => m.Content.Contains("FULL-ONLY-MARKER"));
+    }
+
     // ----- Escalation lifecycle -----
 
     [Fact]
@@ -165,7 +181,7 @@ public class AnswerProviderTests
         const string ticketJson = """{"summary":"Refund issue","details":"User wants refund","priority":"medium"}""";
         var ticketChat = new FakeLlmChatClient(ticketJson);
         var provider = CreateProvider(new FakeLlmChatClient("unused"), ticketChat);
-        var session = new ConversationSession([], DateTimeOffset.UtcNow, EscalationPending: true, EscalationTriggerMessage: "I want a refund");
+        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, EscalationPending: true, EscalationTriggerMessage: "I want a refund");
         var contact = new ContactInfo("a@b.com", null);
 
         var events = await CollectAsync(provider.StreamAsync("contact submitted", session, contact));
@@ -183,7 +199,7 @@ public class AnswerProviderTests
         const string ticketJson = """{"summary":"s","details":"d","priority":"low"}""";
         var ticketChat = new FakeLlmChatClient(ticketJson);
         var provider = CreateProvider(new FakeLlmChatClient("unused"), ticketChat);
-        var session = new ConversationSession([], DateTimeOffset.UtcNow, EscalationPending: true, EscalationTriggerMessage: "need help");
+        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, EscalationPending: true, EscalationTriggerMessage: "need help");
         var contact = new ContactInfo("x@y.com", null);
 
         var result = await provider.AnswerAsync("contact submitted", session, contact);
@@ -197,7 +213,7 @@ public class AnswerProviderTests
     {
         var chat = new FakeLlmChatClient("ANSWER\nHere is your answer.");
         var provider = CreateProvider(chat);
-        var session = new ConversationSession([], DateTimeOffset.UtcNow, EscalationPending: true);
+        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, EscalationPending: true);
 
         // No contact supplied — should NOT generate ticket, should run normal RAG
         var events = await CollectAsync(provider.StreamAsync("hello", session, contact: null));

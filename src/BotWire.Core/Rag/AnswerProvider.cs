@@ -342,9 +342,9 @@ public sealed class AnswerProvider : IAnswerProvider
         string currentMessage,
         CancellationToken ct)
     {
-        var messages = new List<ChatMessage>(session.History.Count + 2);
+        var messages = new List<ChatMessage>(session.SendHistory.Count + 2);
         // Quote user messages so the triage LLM also treats them as data.
-        foreach (var m in session.History)
+        foreach (var m in session.SendHistory)
             messages.Add(m.Role == ChatRole.User ? new(ChatRole.User, QuoteUserMessage(m.Content)) : m);
         messages.Add(new(ChatRole.User, QuoteUserMessage(currentMessage)));
         messages.Add(new(ChatRole.System,
@@ -369,12 +369,12 @@ public sealed class AnswerProvider : IAnswerProvider
         ConversationSession session,
         string userMessage)
     {
-        var messages = new List<ChatMessage>(session.History.Count + 3)
+        var messages = new List<ChatMessage>(session.SendHistory.Count + 3)
         {
             new(ChatRole.System, systemPrompt),
         };
         // Quote every user message so the LLM treats user content as data, not instructions.
-        foreach (var m in session.History)
+        foreach (var m in session.SendHistory)
             messages.Add(m.Role == ChatRole.User ? new(ChatRole.User, QuoteUserMessage(m.Content)) : m);
         // Injected just before the user turn — escalates to a critical warning if recent turns
         // had no control word, since the model is clearly drifting.

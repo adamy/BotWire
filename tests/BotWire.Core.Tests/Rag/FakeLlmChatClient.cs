@@ -34,8 +34,14 @@ internal sealed class FakeLlmChatClient : ILlmChatClient
 
     public string Name => "fake";
 
-    public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default) =>
-        Task.FromResult(_full);
+    /// <summary>Messages from the most recent <see cref="ChatAsync"/> call, for assertions.</summary>
+    public IReadOnlyList<ChatMessage>? LastMessages { get; private set; }
+
+    public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
+    {
+        LastMessages = messages;
+        return Task.FromResult(_full);
+    }
 
     public async IAsyncEnumerable<string> ChatStreamingAsync(
         IReadOnlyList<ChatMessage> messages,

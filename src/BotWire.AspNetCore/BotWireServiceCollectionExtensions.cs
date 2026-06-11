@@ -16,9 +16,11 @@
 
 using BotWire.AspNetCore;
 using BotWire.Core.Abstractions;
+using BotWire.Core.Conversation;
 using BotWire.Core.Exceptions;
 using BotWire.Core.Llm;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -98,6 +100,9 @@ public static class BotWireServiceCollectionExtensions
 
         // ── Conversation store ──────────────────────────────────────────────────
         services.AddInMemoryConversationStore(o => o.SessionTtl = opts.SessionTtl);
+
+        // Summary compression for the send-history. TryAdd lets a host swap in its own.
+        services.TryAddSingleton<ISummaryCompressor, SummaryCompressor>();
 
         // ── Answer provider (RAG, Mode A) ───────────────────────────────────────
         services.AddBotWireAnswerProvider(o =>
