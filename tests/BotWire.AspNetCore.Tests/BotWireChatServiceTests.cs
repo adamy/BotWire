@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using BotWire.AspNetCore.Tests.Fakes;
+using BotWire.Core.Audit;
 using BotWire.Core.Enums;
 using BotWire.Core.Guard;
 using BotWire.Core.Models;
@@ -47,6 +48,7 @@ public class BotWireChatServiceTests
             NullPromptInjectionGuard.Instance,
             rateLimiter,
             new FakeSummaryCompressor(),
+            NullAuditLogger.Instance,
             Options.Create(new BotWireOptions { MaxMessageLength = maxMsg }),
             Options.Create(new PiiGuardOptions()));
 

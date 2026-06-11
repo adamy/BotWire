@@ -16,6 +16,7 @@
 
 using BotWire.AspNetCore;
 using BotWire.Core.Abstractions;
+using BotWire.Core.Audit;
 using BotWire.Core.Conversation;
 using BotWire.Core.Exceptions;
 using BotWire.Core.Llm;
@@ -103,6 +104,9 @@ public static class BotWireServiceCollectionExtensions
 
         // Summary compression for the send-history. TryAdd lets a host swap in its own.
         services.TryAddSingleton<ISummaryCompressor, SummaryCompressor>();
+
+        // Audit log: no-op by default. AddJsonAuditLog(...) or a custom registration replaces it.
+        services.TryAddSingleton<IAuditLogger>(NullAuditLogger.Instance);
 
         // ── Answer provider (RAG, Mode A) ───────────────────────────────────────
         services.AddBotWireAnswerProvider(o =>

@@ -132,6 +132,32 @@ Register your own `IEmailTemplateFormatter` to control how tickets are formatted
 builder.Services.AddSingleton<IEmailTemplateFormatter, MyEmailFormatter>();
 ```
 
+### Audit log
+
+BotWire can emit business/compliance events (messages, guard blocks, escalations, rate-limit
+hits, errors) to a write-only audit sink — separate from application logging (`ILogger<T>`).
+The default is a no-op. Append newline-delimited JSON (NDJSON) to a file with one line:
+
+```csharp
+builder.Services.AddBotWire(opts => { /* ... */ })
+                .AddJsonAuditLog("logs/audit.ndjson");
+```
+
+Each line is a self-contained JSON object, e.g.:
+
+```jsonl
+{"ts":"2026-06-11T10:00:00+00:00","event":"message","sessionId":"u-123","role":"user","content":"refund?"}
+{"ts":"2026-06-11T10:00:01+00:00","event":"escalated","sessionId":"u-123","reason":"NEED_HUMAN","ticketId":"TKT-20260611-0042"}
+```
+
+The file is opened for shared reading (`tail -f`-friendly) and concurrent writes are serialised.
+BotWire only writes; querying is up to you. To send events elsewhere (database, queue), register
+your own `IAuditLogger`:
+
+```csharp
+builder.Services.AddSingleton<IAuditLogger, MyAuditLogger>();
+```
+
 ## Deploying behind a reverse proxy or CDN
 
 If your site sits behind a reverse proxy or CDN (Cloudflare, nginx, IIS ARR, …), the

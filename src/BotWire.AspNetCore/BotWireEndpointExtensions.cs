@@ -18,6 +18,8 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using BotWire.AspNetCore;
+using BotWire.Core.Abstractions;
+using BotWire.Core.Audit;
 using BotWire.Core.Enums;
 using BotWire.Core.Models;
 using Microsoft.AspNetCore.Http;
@@ -92,7 +94,8 @@ public static class BotWireEndpointExtensions
     private static async Task HandleChatStreamAsync(
         ChatRequest req,
         HttpContext context,
-        BotWireChatService service)
+        BotWireChatService service,
+        IAuditLogger audit)
     {
         var ip       = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var response = context.Response;
@@ -160,6 +163,12 @@ public static class BotWireEndpointExtensions
         {
             // Client disconnected — skip CommitStreamAsync to avoid storing a partial turn
             return;
+        }
+        catch (Exception ex)
+        {
+            // Record the failure for the audit trail, then let it propagate (ASP.NET aborts the stream).
+            await audit.LogAsync(AuditEvents.Error(prep.Token ?? "", ex.Message), CancellationToken.None);
+            throw;
         }
 
         await service.CommitStreamAsync(

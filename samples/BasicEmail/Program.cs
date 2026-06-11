@@ -42,7 +42,8 @@ builder.Services.AddBotWire(opts =>
         FromAddress = "support@acme.example",
         ToAddress   = "support-team@acme.example",
     };
-});
+})
+.AddJsonAuditLog(Path.Combine(AppContext.BaseDirectory, "logs", "audit.ndjson"));
 
 var app = builder.Build();
 app.UseDefaultFiles();

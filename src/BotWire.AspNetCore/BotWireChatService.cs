@@ -14,7 +14,9 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+using System.Diagnostics;
 using BotWire.Core.Abstractions;
+using BotWire.Core.Audit;
 using BotWire.Core.Conversation;
 using BotWire.Core.Enums;
 using BotWire.Core.Guard;
@@ -59,6 +61,7 @@ internal sealed class BotWireChatService
     private readonly IPromptInjectionGuard _injectionGuard;
     private readonly IpRateLimiter _rateLimiter;
     private readonly ISummaryCompressor _compressor;
+    private readonly IAuditLogger _audit;
     private readonly IOptions<BotWireOptions> _options;
     private readonly IOptions<PiiGuardOptions> _piiOptions;
 
@@ -70,6 +73,7 @@ internal sealed class BotWireChatService
         IPromptInjectionGuard injectionGuard,
         IpRateLimiter rateLimiter,
         ISummaryCompressor compressor,
+        IAuditLogger audit,
         IOptions<BotWireOptions> options,
         IOptions<PiiGuardOptions> piiOptions)
     {
@@ -80,6 +84,7 @@ internal sealed class BotWireChatService
         _injectionGuard = injectionGuard;
         _rateLimiter    = rateLimiter;
         _compressor     = compressor;
+        _audit          = audit;
         _options        = options;
         _piiOptions     = piiOptions;
     }
@@ -91,17 +96,37 @@ internal sealed class BotWireChatService
     /// </summary>
     public async Task<ChatResult> AnswerAsync(ChatRequest req, string clientIp, CancellationToken ct = default)
     {
-        var guard = CheckGuards(req.Message, req.SessionToken, clientIp);
+        var guard = await CheckGuardsAsync(req.Message, req.SessionToken, clientIp, ct);
         if (guard is not null) return guard;
 
         var (token, session) = await ResolveSessionAsync(req.SessionToken, ct);
         if (session is null)
             return new ChatResult("InvalidSession", "Invalid session token.", "", null, 400);
 
+        await _audit.LogAsync(AuditEvents.UserMessage(token, req.Message), ct);
+
         var contact = BuildContact(req.ContactEmail, session);
 
-        var result = await _answers.AnswerAsync(req.Message, session, contact, ct);
+        AnswerResult result;
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            result = await _answers.AnswerAsync(req.Message, session, contact, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await _audit.LogAsync(AuditEvents.Error(token, ex.Message), CancellationToken.None);
+            throw;
+        }
+        sw.Stop();
+
         await SaveAnswerAsync(token, session, req.Message, result, ct);
+
+        await _audit.LogAsync(AuditEvents.AssistantMessage(token, sw.ElapsedMilliseconds), ct);
+        if (result.Status == AnswerStatus.NeedHuman)
+            await _audit.LogAsync(AuditEvents.Escalated(token, "NEED_HUMAN"), ct);
+        else if (result.Status == AnswerStatus.TicketCreated)
+            await _audit.LogAsync(AuditEvents.Escalated(token, "NEED_HUMAN", result.Message), ct);
 
         return result.Status switch
         {
@@ -119,7 +144,7 @@ internal sealed class BotWireChatService
     /// </summary>
     public async Task<StreamPrep> PrepareStreamAsync(ChatRequest req, string clientIp, CancellationToken ct = default)
     {
-        var guard = CheckGuards(req.Message, req.SessionToken, clientIp);
+        var guard = await CheckGuardsAsync(req.Message, req.SessionToken, clientIp, ct);
         if (guard is not null)
             return new StreamPrep(guard, null, null, null, null);
 
@@ -130,6 +155,10 @@ internal sealed class BotWireChatService
                 null, null, null, null);
 
         var contact = BuildContact(req.ContactEmail, session);
+
+        // Skip the empty placeholder sent when submitting the contact form.
+        if (!string.IsNullOrWhiteSpace(req.Message))
+            await _audit.LogAsync(AuditEvents.UserMessage(token, req.Message), ct);
 
         return new StreamPrep(null, token, session, contact, req.Message);
     }
@@ -199,6 +228,14 @@ internal sealed class BotWireChatService
         }
 
         await _sessions.SaveAsync(prep.Token!, updatedSession, ct);
+
+        var sessionId = prep.Token!;
+        if (accumulatedText.Length > 0)
+            await _audit.LogAsync(AuditEvents.AssistantMessage(sessionId), ct);
+        if (confirmedTicketId is not null)
+            await _audit.LogAsync(AuditEvents.Escalated(sessionId, "NEED_HUMAN", confirmedTicketId), ct);
+        else if (escalationStarted)
+            await _audit.LogAsync(AuditEvents.Escalated(sessionId, "NEED_HUMAN"), ct);
     }
 
     /// <summary>
@@ -210,7 +247,10 @@ internal sealed class BotWireChatService
         InitSessionRequest req, string clientIp, CancellationToken ct = default)
     {
         if (!_rateLimiter.IsAllowed(clientIp))
+        {
+            await _audit.LogAsync(AuditEvents.RateLimited("", "MaxRequestsPerIpPerMinute"), ct);
             return (new ChatResult("Blocked", "Too many requests.", "", null, 429), "", false);
+        }
 
         var name     = string.IsNullOrWhiteSpace(req.Name)     ? null : req.Name.Trim();
         var username = string.IsNullOrWhiteSpace(req.Username) ? null : req.Username.Trim();
@@ -273,22 +313,36 @@ internal sealed class BotWireChatService
             session.KnownUser?.Username);
     }
 
-    private ChatResult? CheckGuards(string message, string? sessionToken, string clientIp)
+    private async Task<ChatResult?> CheckGuardsAsync(
+        string message, string? sessionToken, string clientIp, CancellationToken ct)
     {
         var opts = _options.Value;
+        var sessionId = sessionToken ?? "";
 
         if (message.Length > opts.MaxMessageLength)
-            return new ChatResult("Blocked", "Message too long.", sessionToken ?? "", null, 400);
+        {
+            await _audit.LogAsync(AuditEvents.GuardBlocked(sessionId, "MaxMessageLength"), ct);
+            return new ChatResult("Blocked", "Message too long.", sessionId, null, 400);
+        }
 
         if (!_rateLimiter.IsAllowed(clientIp))
-            return new ChatResult("Blocked", "Too many requests.", sessionToken ?? "", null, 429);
+        {
+            await _audit.LogAsync(AuditEvents.RateLimited(sessionId, "MaxRequestsPerIpPerMinute"), ct);
+            return new ChatResult("Blocked", "Too many requests.", sessionId, null, 429);
+        }
 
         var pii = _piiGuard.Check(message);
         if (pii.Blocked)
-            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionToken ?? "", null, 400);
+        {
+            await _audit.LogAsync(AuditEvents.GuardBlocked(sessionId, "pii"), ct);
+            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionId, null, 400);
+        }
 
         if (_injectionGuard.IsInjectionAttempt(message))
-            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionToken ?? "", null, 400);
+        {
+            await _audit.LogAsync(AuditEvents.GuardBlocked(sessionId, "prompt_injection"), ct);
+            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionId, null, 400);
+        }
 
         return null;
     }
