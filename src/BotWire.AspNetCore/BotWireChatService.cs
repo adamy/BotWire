@@ -122,7 +122,7 @@ internal sealed class BotWireChatService
 
         await SaveAnswerAsync(token, session, req.Message, result, ct);
 
-        await _audit.LogAsync(AuditEvents.AssistantMessage(token, sw.ElapsedMilliseconds), ct);
+        await _audit.LogAsync(AuditEvents.AssistantMessage(token, result.Message, sw.ElapsedMilliseconds), ct);
         if (result.Status == AnswerStatus.NeedHuman)
             await _audit.LogAsync(AuditEvents.Escalated(token, "NEED_HUMAN"), ct);
         else if (result.Status == AnswerStatus.TicketCreated)
@@ -231,7 +231,7 @@ internal sealed class BotWireChatService
 
         var sessionId = prep.Token!;
         if (accumulatedText.Length > 0)
-            await _audit.LogAsync(AuditEvents.AssistantMessage(sessionId), ct);
+            await _audit.LogAsync(AuditEvents.AssistantMessage(sessionId, accumulatedText), ct);
         if (confirmedTicketId is not null)
             await _audit.LogAsync(AuditEvents.Escalated(sessionId, "NEED_HUMAN", confirmedTicketId), ct);
         else if (escalationStarted)

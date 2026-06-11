@@ -67,6 +67,7 @@ public class BotWireChatServiceAuditTests
         Assert.Equal("user", Field(messages[0], "role"));
         Assert.Equal("How do I reset my password?", Field(messages[0], "content"));
         Assert.Equal("assistant", Field(messages[1], "role"));
+        Assert.Equal("Test answer", Field(messages[1], "content"));
         Assert.Empty(audit.OfType(AuditEventType.Escalated));
     }
 

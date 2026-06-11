@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using BotWire.Core.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -21,33 +22,38 @@ using Microsoft.Extensions.Logging;
 namespace BotWire.Core.Audit;
 
 /// <summary>
-/// Appends audit events to a newline-delimited JSON (NDJSON) file — one JSON object per line.
-/// The file is opened for shared reading so it can be tailed live. Writes are serialised through a
-/// semaphore so concurrent <see cref="LogAsync"/> calls never interleave or corrupt a line.
-/// Audit failures are logged via <c>ILogger</c> and swallowed: a broken sink must not break a request.
+/// Writes audit events as newline-delimited JSON (NDJSON), one file per session bucketed by UTC
+/// date: <c>{root}/{yyyyMMdd}/{sessionId}.ndjson</c>. Each line is one JSON object. Files are opened
+/// for shared reading so they can be tailed live. Writes are serialised through a semaphore so
+/// concurrent <see cref="LogAsync"/> calls never interleave or corrupt a line. Audit failures are
+/// logged via <c>ILogger</c> and swallowed: a broken sink must not break a request.
 /// </summary>
 public sealed class JsonFileAuditLogger : IAuditLogger, IDisposable
 {
-    private static readonly JsonSerializerOptions _json = new();
+    private const string NoSessionBucket = "no-session";
+
+    // Relaxed encoder so non-ASCII text (e.g. 中文, emoji) is written as readable UTF-8 instead of
+    // \uXXXX escapes. The output is a local NDJSON file, not HTML, so the relaxed escaping is safe.
+    private static readonly JsonSerializerOptions _json = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+    private static readonly char[] _invalidFileNameChars = Path.GetInvalidFileNameChars();
 
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly StreamWriter _writer;
+    private readonly string _root;
     private readonly ILogger<JsonFileAuditLogger> _logger;
 
-    /// <summary>Opens (creating it and any parent directories if needed) the NDJSON file for append.</summary>
-    /// <param name="path">Destination file path, absolute or relative to the working directory.</param>
+    /// <summary>Sets the root directory under which dated per-session NDJSON files are written.</summary>
+    /// <param name="rootDirectory">
+    /// Root folder, absolute or relative to the working directory. Created on demand, along with the
+    /// per-day subfolders.
+    /// </param>
     /// <param name="logger">Logger for write/serialisation failures.</param>
-    public JsonFileAuditLogger(string path, ILogger<JsonFileAuditLogger> logger)
+    public JsonFileAuditLogger(string rootDirectory, ILogger<JsonFileAuditLogger> logger)
     {
+        _root = Path.GetFullPath(rootDirectory);
         _logger = logger;
-
-        var fullPath = Path.GetFullPath(path);
-        var directory = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
-
-        var stream = new FileStream(fullPath, FileMode.Append, FileAccess.Write, FileShare.Read);
-        _writer = new StreamWriter(stream) { AutoFlush = true };
     }
 
     /// <inheritdoc/>
@@ -64,13 +70,20 @@ public sealed class JsonFileAuditLogger : IAuditLogger, IDisposable
             return;
         }
 
+        var path = ResolvePath(evt);
+
         try
         {
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                // Open-per-write keeps no handle open across date/session boundaries; the gate
+                // guarantees a single writer at a time so appends never interleave.
+                using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+                using var writer = new StreamWriter(stream);
                 // Explicit '\n' (not Environment.NewLine) keeps the file valid NDJSON on every platform.
-                await _writer.WriteAsync(line + '\n').ConfigureAwait(false);
+                await writer.WriteAsync(line + '\n').ConfigureAwait(false);
             }
             finally
             {
@@ -82,6 +95,31 @@ public sealed class JsonFileAuditLogger : IAuditLogger, IDisposable
             // Never propagate: a failed audit write must not break the request it describes.
             _logger.LogError(ex, "BotWire: failed to write audit event '{Event}'.", evt.EventType);
         }
+    }
+
+    private string ResolvePath(AuditEvent evt)
+    {
+        var day = evt.Timestamp.UtcDateTime.ToString("yyyyMMdd");
+        var session = SanitizeSessionId(evt.SessionId);
+        return Path.Combine(_root, day, session + ".ndjson");
+    }
+
+    /// <summary>
+    /// Maps a session token to a safe file name: characters illegal in a file name (e.g. the
+    /// <c>/</c> that appears in base64 tokens) become <c>_</c>; an empty id buckets to a shared file.
+    /// </summary>
+    private static string SanitizeSessionId(string sessionId)
+    {
+        if (string.IsNullOrEmpty(sessionId))
+            return NoSessionBucket;
+
+        var chars = sessionId.ToCharArray();
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (Array.IndexOf(_invalidFileNameChars, chars[i]) >= 0)
+                chars[i] = '_';
+        }
+        return new string(chars);
     }
 
     private static string Serialize(AuditEvent evt)
@@ -100,9 +138,5 @@ public sealed class JsonFileAuditLogger : IAuditLogger, IDisposable
     }
 
     /// <inheritdoc/>
-    public void Dispose()
-    {
-        _writer.Dispose();
-        _gate.Dispose();
-    }
+    public void Dispose() => _gate.Dispose();
 }

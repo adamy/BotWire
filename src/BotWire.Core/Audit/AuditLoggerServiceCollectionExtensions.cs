@@ -25,22 +25,23 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class AuditLoggerServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers <see cref="JsonFileAuditLogger"/> as the <see cref="IAuditLogger"/>, writing
-    /// NDJSON to <paramref name="path"/>. Replaces the default <see cref="NullAuditLogger"/>.
+    /// Registers <see cref="JsonFileAuditLogger"/> as the <see cref="IAuditLogger"/>, writing NDJSON
+    /// under <paramref name="rootDirectory"/> as one file per session bucketed by UTC date
+    /// (<c>{root}/{yyyyMMdd}/{sessionId}.ndjson</c>). Replaces the default <see cref="NullAuditLogger"/>.
     /// Chain after <c>AddBotWire(...)</c>:
-    /// <code>services.AddBotWire(...).AddJsonAuditLog("logs/audit.ndjson");</code>
+    /// <code>services.AddBotWire(...).AddJsonAuditLog("logs/audit");</code>
     /// </summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="path">Destination NDJSON file path. Created (with parent directories) if missing.</param>
+    /// <param name="rootDirectory">Root folder for audit files. Created (with subfolders) on demand.</param>
     /// <returns>The same <paramref name="services"/> instance for chaining.</returns>
-    public static IServiceCollection AddJsonAuditLog(this IServiceCollection services, string path)
+    public static IServiceCollection AddJsonAuditLog(this IServiceCollection services, string rootDirectory)
     {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("Audit log path must not be empty.", nameof(path));
+        if (string.IsNullOrWhiteSpace(rootDirectory))
+            throw new ArgumentException("Audit log directory must not be empty.", nameof(rootDirectory));
 
         services.RemoveAll<IAuditLogger>();
         services.AddSingleton<IAuditLogger>(sp =>
-            new JsonFileAuditLogger(path, sp.GetRequiredService<ILogger<JsonFileAuditLogger>>()));
+            new JsonFileAuditLogger(rootDirectory, sp.GetRequiredService<ILogger<JsonFileAuditLogger>>()));
 
         return services;
     }

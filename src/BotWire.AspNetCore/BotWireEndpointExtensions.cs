@@ -38,6 +38,13 @@ public static class BotWireEndpointExtensions
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
+    // Relaxed encoder so non-ASCII text in the SSE stream (e.g. 中文 replies) goes over the wire as
+    // readable UTF-8 instead of \uXXXX escapes. Browsers parse both, but raw/console views stay legible.
+    private static readonly JsonSerializerOptions _sseJsonOpts = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     /// <summary>
     /// Maps all BotWire endpoints (<c>POST /support/chat</c>, <c>POST /support/chat/stream</c>,
     /// <c>GET /botwire/widget.js</c>, <c>GET /botwire/health</c>) and applies the
@@ -129,7 +136,7 @@ public static class BotWireEndpointExtensions
                     case BotEventKind.TextChunk:
                         textBuffer.Append(evt.Text);
                         await WriteSseAsync(response,
-                            $"{{\"type\":\"token\",\"value\":{JsonSerializer.Serialize(evt.Text)}}}");
+                            $"{{\"type\":\"token\",\"value\":{JsonSerializer.Serialize(evt.Text, _sseJsonOpts)}}}");
                         break;
 
                     case BotEventKind.CollectContact:
@@ -140,12 +147,12 @@ public static class BotWireEndpointExtensions
                     case BotEventKind.TicketConfirmed:
                         confirmedTicketId = evt.TicketId;
                         await WriteSseAsync(response,
-                            $"{{\"type\":\"escalated\",\"ticketId\":{JsonSerializer.Serialize(evt.TicketId)},\"message\":{JsonSerializer.Serialize(evt.ConfirmationMessage)}}}");
+                            $"{{\"type\":\"escalated\",\"ticketId\":{JsonSerializer.Serialize(evt.TicketId, _sseJsonOpts)},\"message\":{JsonSerializer.Serialize(evt.ConfirmationMessage, _sseJsonOpts)}}}");
                         break;
 
                     case BotEventKind.Blocked:
                         await WriteSseAsync(response,
-                            $"{{\"type\":\"blocked\",\"reason\":{JsonSerializer.Serialize(evt.Reason)}}}");
+                            $"{{\"type\":\"blocked\",\"reason\":{JsonSerializer.Serialize(evt.Reason, _sseJsonOpts)}}}");
                         break;
 
                     case BotEventKind.Done:

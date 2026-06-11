@@ -136,21 +136,22 @@ builder.Services.AddSingleton<IEmailTemplateFormatter, MyEmailFormatter>();
 
 BotWire can emit business/compliance events (messages, guard blocks, escalations, rate-limit
 hits, errors) to a write-only audit sink — separate from application logging (`ILogger<T>`).
-The default is a no-op. Append newline-delimited JSON (NDJSON) to a file with one line:
+The default is a no-op. Write newline-delimited JSON (NDJSON) under a root folder — one file per
+session, bucketed by UTC date (`{root}/{yyyyMMdd}/{sessionId}.ndjson`):
 
 ```csharp
 builder.Services.AddBotWire(opts => { /* ... */ })
-                .AddJsonAuditLog("logs/audit.ndjson");
+                .AddJsonAuditLog("logs/audit");
 ```
 
-Each line is a self-contained JSON object, e.g.:
+Each line is a self-contained JSON object, e.g. in `logs/audit/20260611/u-123.ndjson`:
 
 ```jsonl
 {"ts":"2026-06-11T10:00:00+00:00","event":"message","sessionId":"u-123","role":"user","content":"refund?"}
 {"ts":"2026-06-11T10:00:01+00:00","event":"escalated","sessionId":"u-123","reason":"NEED_HUMAN","ticketId":"TKT-20260611-0042"}
 ```
 
-The file is opened for shared reading (`tail -f`-friendly) and concurrent writes are serialised.
+Files are opened for shared reading (`tail -f`-friendly) and concurrent writes are serialised.
 BotWire only writes; querying is up to you. To send events elsewhere (database, queue), register
 your own `IAuditLogger`:
 
