@@ -92,7 +92,7 @@ internal sealed class BotWireChatService
 
         var (token, session) = await ResolveSessionAsync(req.SessionToken, ct);
         if (session is null)
-            return new ChatResult("Blocked", "Invalid session token.", "", null, 400);
+            return new ChatResult("InvalidSession", "Invalid session token.", "", null, 400);
 
         var contact = BuildContact(req.ContactEmail, session);
 
@@ -122,7 +122,7 @@ internal sealed class BotWireChatService
         var (token, session) = await ResolveSessionAsync(req.SessionToken, ct);
         if (session is null)
             return new StreamPrep(
-                new ChatResult("Blocked", "Invalid session token.", "", null, 400),
+                new ChatResult("InvalidSession", "Invalid session token.", "", null, 400),
                 null, null, null, null);
 
         var contact = BuildContact(req.ContactEmail, session);

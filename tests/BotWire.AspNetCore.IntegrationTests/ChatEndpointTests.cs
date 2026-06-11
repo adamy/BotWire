@@ -189,14 +189,28 @@ public class ChatEndpointTests
     }
 
     [Fact]
-    public async Task InvalidToken_Returns400()
+    public async Task InvalidToken_Returns400WithInvalidSessionStatus()
     {
         await using var host = await BotWireTestHost.CreateAsync();
         var resp = await host.Client.PostAsJsonAsync("/support/chat",
             new ChatRequest { Message = "Hello", SessionToken = "invalid-garbage-token" });
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
 
+        // Stable machine-readable marker — the widget relies on this exact value
+        // to self-heal stale sessions instead of matching the English message text.
         var body = await resp.Content.ReadFromJsonAsync<ChatResponse>();
-        Assert.Equal("Blocked", body!.Status);
+        Assert.Equal("InvalidSession", body!.Status);
+    }
+
+    [Fact]
+    public async Task InvalidToken_StreamEndpoint_Returns400WithInvalidSessionStatus()
+    {
+        await using var host = await BotWireTestHost.CreateAsync();
+        var resp = await host.Client.PostAsJsonAsync("/support/chat/stream",
+            new ChatRequest { Message = "Hello", SessionToken = "invalid-garbage-token" });
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+
+        var body = await resp.Content.ReadFromJsonAsync<ChatResponse>();
+        Assert.Equal("InvalidSession", body!.Status);
     }
 }

@@ -132,6 +132,54 @@ Register your own `IEmailTemplateFormatter` to control how tickets are formatted
 builder.Services.AddSingleton<IEmailTemplateFormatter, MyEmailFormatter>();
 ```
 
+## Deploying behind a reverse proxy or CDN
+
+If your site sits behind a reverse proxy or CDN (Cloudflare, nginx, IIS ARR, …), the
+connection BotWire sees comes from the proxy, not the visitor. Two things need attention:
+
+### Restore the real client IP
+
+BotWire's rate limiter keys on the client IP. Behind a proxy every visitor appears to
+come from a handful of proxy IPs, so legitimate traffic can trip the limiter (HTTP 429).
+Enable ASP.NET Core's forwarded-headers middleware **before** `MapBotWire()`:
+
+```csharp
+using Microsoft.AspNetCore.HttpOverrides;
+
+builder.Services.Configure<ForwardedHeadersOptions>(opts =>
+{
+    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // Trust your proxy. For Cloudflare, add its published IP ranges to KnownNetworks,
+    // or clear the lists if an upstream firewall already guarantees the source.
+    opts.KnownNetworks.Clear();
+    opts.KnownProxies.Clear();
+});
+
+app.UseForwardedHeaders();
+```
+
+Cloudflare also sends the original visitor IP in the `CF-Connecting-IP` header; if you
+prefer that over `X-Forwarded-For`, copy it into `X-Forwarded-For` at your origin server
+or use Cloudflare's [authenticated origin pulls + restore-IP guidance](https://developers.cloudflare.com/support/troubleshooting/restoring-visitor-ips/restoring-original-visitor-ips/).
+
+### Cloudflare-specific settings
+
+- **Bypass cache for `/support/*`** — chat responses are per-visitor and streamed; add a
+  cache rule that bypasses cache for `/support/*` so Cloudflare never caches or buffers them.
+- **Disable Rocket Loader** for pages embedding the widget — it defers script execution
+  and can break the widget's custom element registration.
+- **Use Full (strict) SSL** — Flexible SSL terminates TLS at the edge and connects to your
+  origin over HTTP, which can cause redirect loops and mixed-content issues with SSE.
+
+### Session tokens and process restarts
+
+The default session store (`AddInMemoryConversationStore`) lives in process memory. On
+shared hosting, app-pool recycles or redeploys clear it, so browsers may hold a stale
+session token. The widget handles this automatically: a rejected token
+(`status: "InvalidSession"`) makes it create a fresh session and resend the message once,
+invisibly to the user. Custom clients should do the same — see the
+`status` field on the 400 response.
+
 ## Running tests
 
 ### Unit tests (no API key needed)

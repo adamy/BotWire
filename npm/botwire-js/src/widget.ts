@@ -367,7 +367,7 @@ class BotWireWidget extends HTMLElement {
     let botEl: HTMLElement | null = null;
 
     try {
-      const resp = await this.post(`${this.endpoint}/chat/stream`, body);
+      const resp = await this.openStream(body);
 
       if (!resp.ok || !resp.body) {
         this.typing.hidden = true;
@@ -439,6 +439,34 @@ class BotWireWidget extends HTMLElement {
         this.sendBtn.disabled = false;
         if (!this.panel.hidden) this.input.focus();
       }
+    }
+  }
+
+  // Opens the chat stream, self-healing a stale session token once: when the
+  // server rejects the token (400 + status "InvalidSession" — e.g. after an app
+  // pool restart cleared the in-memory store), drop the local token, create a
+  // fresh session, and resend the same message. At most one retry.
+  private async openStream(body: Record<string, unknown>): Promise<Response> {
+    let resp = await this.post(`${this.endpoint}/chat/stream`, body);
+
+    if (resp.status === 400 && await this.isInvalidSession(resp)) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      this.sessionToken = null;
+      await this.initSession();
+      if (this.sessionToken) {
+        body['sessionToken'] = this.sessionToken;
+        resp = await this.post(`${this.endpoint}/chat/stream`, body);
+      }
+    }
+    return resp;
+  }
+
+  private async isInvalidSession(resp: Response): Promise<boolean> {
+    try {
+      const data = await resp.clone().json() as { status?: string };
+      return data.status === 'InvalidSession';
+    } catch {
+      return false;
     }
   }
 

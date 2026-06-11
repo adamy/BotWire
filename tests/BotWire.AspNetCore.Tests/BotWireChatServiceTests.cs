@@ -161,7 +161,8 @@ public class BotWireChatServiceTests
         var (svc, _) = Create();
         var result = await svc.AnswerAsync(ChatReq(token: "no-such-token"), "1.2.3.4");
         Assert.Equal(400, result.HttpStatusCode);
-        Assert.Equal("Blocked", result.Status);
+        // Stable machine-readable marker the widget uses to self-heal stale sessions
+        Assert.Equal("InvalidSession", result.Status);
     }
 
     [Fact]
@@ -202,6 +203,16 @@ public class BotWireChatServiceTests
         var prep = await svc.PrepareStreamAsync(ChatReq(token: null), "1.2.3.4");
         Assert.Null(prep.Error);
         Assert.True(store.Contains(prep.Token!));
+    }
+
+    [Fact]
+    public async Task PrepareStreamAsync_InvalidToken_ReturnsInvalidSession400()
+    {
+        var (svc, _) = Create();
+        var prep = await svc.PrepareStreamAsync(ChatReq(token: "no-such-token"), "1.2.3.4");
+        Assert.NotNull(prep.Error);
+        Assert.Equal(400, prep.Error!.HttpStatusCode);
+        Assert.Equal("InvalidSession", prep.Error.Status);
     }
 
     // ── CommitStreamAsync ─────────────────────────────────────────────────────────

@@ -21,7 +21,11 @@ namespace BotWire.AspNetCore;
 /// <summary>Response body for the BotWire chat endpoints.</summary>
 public sealed class ChatResponse
 {
-    /// <summary>Outcome: <c>Answered</c>, <c>NeedHuman</c>, <c>TicketCreated</c>, or <c>Blocked</c>.</summary>
+    /// <summary>
+    /// Outcome: <c>Answered</c>, <c>NeedHuman</c>, <c>TicketCreated</c>, <c>Blocked</c>,
+    /// or <c>InvalidSession</c> (stale/unknown session token — clients should create a
+    /// new session and retry once).
+    /// </summary>
     [JsonPropertyName("status")]
     public string Status { get; }
 

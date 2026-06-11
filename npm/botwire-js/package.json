@@ -5,10 +5,13 @@
   "scripts": {
     "build": "tsc --noEmit && esbuild src/widget.ts --bundle --minify --outfile=dist/botwire.js",
     "build:fast": "esbuild src/widget.ts --bundle --minify --outfile=dist/botwire.js",
-    "size": "esbuild src/widget.ts --bundle --minify | gzip -c | wc -c"
+    "size": "esbuild src/widget.ts --bundle --minify | gzip -c | wc -c",
+    "test": "vitest run"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
-    "typescript": "^6.0.3"
+    "happy-dom": "^20.0.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.5"
   }
 }
