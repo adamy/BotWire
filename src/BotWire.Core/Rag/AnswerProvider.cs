@@ -87,6 +87,7 @@ public sealed class AnswerProvider : IAnswerProvider
             return new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId);
         }
 
+        var triageContinued = false;
         if (session.ConsecutiveNoControlWordCount >= _options.FailOpenEscalateThreshold)
         {
             var needsHuman = await TriageEscalationAsync(session, message, cancellationToken);
@@ -98,8 +99,9 @@ public sealed class AnswerProvider : IAnswerProvider
                 return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage, FailedOpen: false);
             }
             _logger.LogInformation(
-                "BotWire: auto-triage after {Count} fail-open turns — no escalation needed, continuing.",
+                "BotWire: auto-triage after {Count} fail-open turns — no escalation needed, resetting counter and continuing.",
                 session.ConsecutiveNoControlWordCount);
+            triageContinued = true;
         }
 
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
@@ -111,7 +113,9 @@ public sealed class AnswerProvider : IAnswerProvider
         if (!parsed.Recognized)
             _logger.LogWarning("LLM response had no recognized control word; failing open as ANSWER.");
 
-        return new AnswerResult(parsed.Status, parsed.Message, FailedOpen: !parsed.Recognized);
+        // When triage just adjudicated the fail-open streak and chose to continue, reset the counter
+        // (FailedOpen = false) so triage does not re-run on every subsequent turn.
+        return new AnswerResult(parsed.Status, parsed.Message, FailedOpen: !parsed.Recognized && !triageContinued);
     }
 
     /// <inheritdoc/>
@@ -134,6 +138,7 @@ public sealed class AnswerProvider : IAnswerProvider
             yield break;
         }
 
+        var triageContinued = false;
         if (session.ConsecutiveNoControlWordCount >= _options.FailOpenEscalateThreshold)
         {
             var needsHuman = await TriageEscalationAsync(session, message, cancellationToken);
@@ -161,8 +166,9 @@ public sealed class AnswerProvider : IAnswerProvider
                 yield break;
             }
             _logger.LogInformation(
-                "BotWire: auto-triage after {Count} fail-open turns — no escalation needed, continuing.",
+                "BotWire: auto-triage after {Count} fail-open turns — no escalation needed, resetting counter and continuing.",
                 session.ConsecutiveNoControlWordCount);
+            triageContinued = true;
         }
 
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
@@ -310,7 +316,10 @@ public sealed class AnswerProvider : IAnswerProvider
                 yield return BotEvent.TextChunk(emit);
         }
 
-        yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, answer.ToString(), FailedOpen: failedOpen));
+        // When triage just adjudicated the fail-open streak and chose to continue, reset the counter
+        // (FailedOpen = false) so triage does not re-run on every subsequent turn.
+        yield return BotEvent.Done(
+            new AnswerResult(AnswerStatus.Answered, answer.ToString(), FailedOpen: failedOpen && !triageContinued));
     }
 
     private async Task NotifyAsync(SupportTicket ticket, CancellationToken ct)

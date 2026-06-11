@@ -318,4 +318,33 @@ public class AnswerProviderTests
         // Note: FailedOpen flag exists, but ConsecutiveNoControlWordCount is session-level,
         // not returned from AnswerAsync. Would be tested at service layer.
     }
+
+    [Fact]
+    public async Task AnswerAsync_TriageNoEscalation_ResetsFailOpenCounter()
+    {
+        // Fake returns no control word: triage replies non-YES (no escalation) AND the answer
+        // itself fails open. Because triage adjudicated the streak, FailedOpen must reset to false
+        // so triage does not re-run on every subsequent turn.
+        var chat = new FakeLlmChatClient("no control word here");
+        var provider = CreateProvider(chat);
+        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, ConsecutiveNoControlWordCount: 3);
+
+        var result = await provider.AnswerAsync("hi", session);
+
+        Assert.Equal(AnswerStatus.Answered, result.Status);
+        Assert.False(result.FailedOpen);
+    }
+
+    [Fact]
+    public async Task StreamAsync_TriageNoEscalation_ResetsFailOpenCounterOnDone()
+    {
+        var chat = new FakeLlmChatClient("no control word here");
+        var provider = CreateProvider(chat);
+        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, ConsecutiveNoControlWordCount: 3);
+
+        var events = await CollectAsync(provider.StreamAsync("hi", session));
+
+        var done = events.Single(e => e.Kind == BotEventKind.Done);
+        Assert.False(done.Result!.FailedOpen);
+    }
 }
