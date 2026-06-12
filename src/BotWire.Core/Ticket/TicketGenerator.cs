@@ -75,7 +75,7 @@ internal sealed class TicketGenerator
         CancellationToken cancellationToken = default)
     {
         var messages = BuildMessages(session);
-        var raw = await _chat.ChatAsync(messages, cancellationToken);
+        var raw = await _chat.ChatAsync(messages, jsonObject: false, cancellationToken);
         var json = StripMarkdownFences(raw);
 
         string summary, details;

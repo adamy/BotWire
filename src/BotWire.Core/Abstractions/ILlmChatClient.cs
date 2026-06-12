@@ -26,13 +26,17 @@ public interface ILlmChatClient
 
     /// <summary>Sends a list of messages to the LLM and returns the complete response.</summary>
     /// <param name="messages">Ordered conversation history including the latest user message.</param>
+    /// <param name="jsonObject">When true, requests a JSON-object response (<c>response_format</c> json_object).</param>
     /// <param name="cancellationToken">Token to cancel the request.</param>
     /// <returns>The LLM's full response text.</returns>
-    Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default);
+    Task<string> ChatAsync(
+        IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken cancellationToken = default);
 
     /// <summary>Sends a list of messages to the LLM and streams the response token by token.</summary>
     /// <param name="messages">Ordered conversation history including the latest user message.</param>
+    /// <param name="jsonObject">When true, requests a JSON-object response (<c>response_format</c> json_object).</param>
     /// <param name="cancellationToken">Token to cancel the stream.</param>
     /// <returns>An async sequence of text tokens as they are produced by the LLM.</returns>
-    IAsyncEnumerable<string> ChatStreamingAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<string> ChatStreamingAsync(
+        IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken cancellationToken = default);
 }

@@ -122,7 +122,7 @@ internal sealed class BotWireChatService
 
         await SaveAnswerAsync(token, session, req.Message, result, ct);
 
-        await _audit.LogAsync(AuditEvents.AssistantMessage(token, result.Message, sw.ElapsedMilliseconds), ct);
+        await _audit.LogAsync(AuditEvents.AssistantMessage(token, result.Message, result.RawResponse, sw.ElapsedMilliseconds), ct);
         if (result.Status == AnswerStatus.NeedHuman)
             await _audit.LogAsync(AuditEvents.Escalated(token, "NEED_HUMAN"), ct);
         else if (result.Status == AnswerStatus.TicketCreated)
@@ -132,6 +132,7 @@ internal sealed class BotWireChatService
         {
             AnswerStatus.TicketCreated => new ChatResult("TicketCreated", null,          token, result.Message),
             AnswerStatus.NeedHuman     => new ChatResult("NeedHuman",     result.Message, token, null),
+            AnswerStatus.OffTopic      => new ChatResult("OffTopic",      result.Message, token, null),
             _                          => new ChatResult("Answered",      result.Message, token, null),
         };
     }
@@ -181,18 +182,28 @@ internal sealed class BotWireChatService
         bool escalationStarted,
         string? confirmedTicketId,
         bool failedOpen = false,
+        string? rawResponse = null,
         CancellationToken ct = default)
     {
         var session = prep.Session!;
 
-        var newTurn = new List<ChatMessage>(2);
+        var newTurnFull = new List<ChatMessage>(2);
+        var newTurnSend = new List<ChatMessage>(2);
         // Skip empty user messages (e.g. the placeholder sent when submitting the contact form)
         if (!string.IsNullOrWhiteSpace(prep.UserMessage))
-            newTurn.Add(new ChatMessage(ChatRole.User, prep.UserMessage!));
+        {
+            var userTurn = new ChatMessage(ChatRole.User, prep.UserMessage!);
+            newTurnFull.Add(userTurn);
+            newTurnSend.Add(userTurn);
+        }
         if (accumulatedText.Length > 0)
-            newTurn.Add(new ChatMessage(ChatRole.Assistant, accumulatedText));
+        {
+            newTurnFull.Add(new ChatMessage(ChatRole.Assistant, accumulatedText));
+            // Send-history carries the JSON envelope (falling back to the text if unavailable).
+            newTurnSend.Add(new ChatMessage(ChatRole.Assistant, rawResponse ?? accumulatedText));
+        }
 
-        var (updatedFull, updatedSend) = await AppendAndCompressAsync(session, newTurn, ct);
+        var (updatedFull, updatedSend) = await AppendAndCompressAsync(session, newTurnFull, newTurnSend, ct);
 
         ConversationSession updatedSession;
         if (confirmedTicketId is not null)
@@ -231,7 +242,7 @@ internal sealed class BotWireChatService
 
         var sessionId = prep.Token!;
         if (accumulatedText.Length > 0)
-            await _audit.LogAsync(AuditEvents.AssistantMessage(sessionId, accumulatedText), ct);
+            await _audit.LogAsync(AuditEvents.AssistantMessage(sessionId, accumulatedText, rawResponse), ct);
         if (confirmedTicketId is not null)
             await _audit.LogAsync(AuditEvents.Escalated(sessionId, "NEED_HUMAN", confirmedTicketId), ct);
         else if (escalationStarted)
@@ -273,15 +284,22 @@ internal sealed class BotWireChatService
     /// Appends a completed turn to both histories, then runs summary compression on the
     /// send-history. <see cref="ConversationSession.FullHistory"/> is never compressed —
     /// ticket generation depends on the complete record.
+    /// <para>
+    /// The send-history assistant turn carries the raw JSON envelope the model emitted, not the
+    /// plain display text. The model imitates its own prior turns, so a plain-text assistant
+    /// history teaches it to drop the required JSON format on later turns (it starts replying with
+    /// bare text or whitespace). Feeding the envelope back keeps every turn consistent with the
+    /// mandated output format. The full-history turn keeps the readable text for ticket generation.
+    /// </para>
     /// </summary>
     private async Task<(List<ChatMessage> Full, List<ChatMessage> Send)> AppendAndCompressAsync(
-        ConversationSession session, List<ChatMessage> newTurn, CancellationToken ct)
+        ConversationSession session, List<ChatMessage> newTurnFull, List<ChatMessage> newTurnSend, CancellationToken ct)
     {
         var updatedFull = new List<ChatMessage>(session.FullHistory);
-        updatedFull.AddRange(newTurn);
+        updatedFull.AddRange(newTurnFull);
 
         var updatedSend = new List<ChatMessage>(session.SendHistory);
-        updatedSend.AddRange(newTurn);
+        updatedSend.AddRange(newTurnSend);
         updatedSend = await _compressor.CompressAsync(updatedSend, _options.Value.SummaryInterval, ct);
 
         return (updatedFull, updatedSend);
@@ -365,14 +383,17 @@ internal sealed class BotWireChatService
     private async Task SaveAnswerAsync(
         string token, ConversationSession session, string message, AnswerResult result, CancellationToken ct)
     {
-        var newTurn = new List<ChatMessage>(2)
-        {
-            new(ChatRole.User, message),
-        };
+        var userTurn = new ChatMessage(ChatRole.User, message);
+        var newTurnFull = new List<ChatMessage>(2) { userTurn };
+        var newTurnSend = new List<ChatMessage>(2) { userTurn };
         if (result.Status != AnswerStatus.TicketCreated)
-            newTurn.Add(new ChatMessage(ChatRole.Assistant, result.Message));
+        {
+            newTurnFull.Add(new ChatMessage(ChatRole.Assistant, result.Message));
+            // Send-history carries the JSON envelope (falling back to the text if unavailable).
+            newTurnSend.Add(new ChatMessage(ChatRole.Assistant, result.RawResponse ?? result.Message));
+        }
 
-        var (updatedFull, updatedSend) = await AppendAndCompressAsync(session, newTurn, ct);
+        var (updatedFull, updatedSend) = await AppendAndCompressAsync(session, newTurnFull, newTurnSend, ct);
 
         var updatedSession = result.Status switch
         {

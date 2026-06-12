@@ -28,8 +28,10 @@ namespace BotWire.Core.Rag;
 
 /// <summary>
 /// RAG Mode A answer provider: grounds an <see cref="ILlmChatClient"/> in a fixed document set and
-/// uses a first-line ANSWER / ESCALATE control word to decide whether the bot answered or must hand
-/// off to a human. The system prompt is assembled (and its token budget enforced) on first use.
+/// requires a JSON-object reply (<c>{offtopic, action, message}</c>) to decide whether the bot
+/// answered, classified the message off-topic, or must hand off to a human. Empty/invalid replies
+/// are retried up to <see cref="AnswerProviderOptions.MaxAnswerAttempts"/> times before escalating.
+/// The system prompt is assembled (and its token budget enforced) on first use.
 /// </summary>
 public sealed class AnswerProvider : IAnswerProvider
 {
@@ -87,35 +89,34 @@ public sealed class AnswerProvider : IAnswerProvider
             return new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId);
         }
 
-        var triageContinued = false;
-        if (session.ConsecutiveNoControlWordCount >= _options.FailOpenEscalateThreshold)
-        {
-            var needsHuman = await TriageEscalationAsync(session, message, cancellationToken);
-            if (needsHuman)
-            {
-                _logger.LogInformation(
-                    "BotWire: auto-triage after {Count} fail-open turns — escalating.",
-                    session.ConsecutiveNoControlWordCount);
-                return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage, FailedOpen: false);
-            }
-            _logger.LogInformation(
-                "BotWire: auto-triage after {Count} fail-open turns — no escalation needed, resetting counter and continuing.",
-                session.ConsecutiveNoControlWordCount);
-            triageContinued = true;
-        }
-
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
 
-        var raw = await _chat.ChatAsync(messages, cancellationToken);
-        var parsed = ResponseControl.Parse(raw);
+        // Retry empty/invalid responses a few times before handing off to a human, since a single
+        // garbled reply (bad JSON, or a whitespace-only message) should not surface as a blank answer.
+        var attempts = Math.Max(1, _options.MaxAnswerAttempts);
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            var raw = await _chat.ChatAsync(messages, jsonObject: true, cancellationToken);
+            var parsed = ParseAnswerJson(raw);
 
-        if (!parsed.Recognized)
-            _logger.LogWarning("LLM response had no recognized control word; failing open as ANSWER.");
+            if (parsed.Ok && parsed.OffTopic && _options.TopicGuardEnabled)
+                return new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: raw);
 
-        // When triage just adjudicated the fail-open streak and chose to continue, reset the counter
-        // (FailedOpen = false) so triage does not re-run on every subsequent turn.
-        return new AnswerResult(parsed.Status, parsed.Message, FailedOpen: !parsed.Recognized && !triageContinued);
+            if (parsed.Ok && parsed.Action == "escalate")
+                return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage, RawResponse: raw);
+
+            if (parsed.Ok && !string.IsNullOrWhiteSpace(parsed.Message))
+                return new AnswerResult(AnswerStatus.Answered, parsed.Message, RawResponse: raw);
+
+            _logger.LogWarning(
+                "BotWire: empty or invalid answer response (attempt {Attempt}/{Max}): '{Raw}'",
+                attempt, attempts, Truncate(raw));
+        }
+
+        // Every attempt was empty or invalid — escalate to a human rather than show a blank answer.
+        _logger.LogWarning("BotWire: {Max} answer attempts were all empty/invalid — escalating to a human.", attempts);
+        return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage);
     }
 
     /// <inheritdoc/>
@@ -138,121 +139,17 @@ public sealed class AnswerProvider : IAnswerProvider
             yield break;
         }
 
-        var triageContinued = false;
-        if (session.ConsecutiveNoControlWordCount >= _options.FailOpenEscalateThreshold)
-        {
-            var needsHuman = await TriageEscalationAsync(session, message, cancellationToken);
-            if (needsHuman)
-            {
-                _logger.LogInformation(
-                    "BotWire: auto-triage after {Count} fail-open turns — escalating.",
-                    session.ConsecutiveNoControlWordCount);
-                var autoMsg = _options.AutoEscalationMessage;
-                if (!string.IsNullOrEmpty(autoMsg))
-                    yield return BotEvent.TextChunk(autoMsg);
-                if (contact is not null)
-                {
-                    var ticket = await _ticketGenerator.GenerateAsync(
-                        session, message, contact, cancellationToken);
-                    await NotifyAsync(ticket, cancellationToken);
-                    var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
-                    yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
-                    yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
-                }
-                else
-                {
-                    yield return BotEvent.CollectContact();
-                }
-                yield break;
-            }
-            _logger.LogInformation(
-                "BotWire: auto-triage after {Count} fail-open turns — no escalation needed, resetting counter and continuing.",
-                session.ConsecutiveNoControlWordCount);
-            triageContinued = true;
-        }
-
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
 
-        var buffer      = new StringBuilder();
-        var answer      = new StringBuilder();
-        var resolved    = false; // once true, the control-word decision is made and deltas pass through
-        var escalating  = false; // true once ESCALATE control word detected
-        var failedOpen  = false; // true when no control word found; triggers stronger reminder next turn
-
-        await foreach (var delta in _chat.ChatStreamingAsync(messages, cancellationToken))
+        // Reused by both the live first attempt and the buffered retries below.
+        async IAsyncEnumerable<BotEvent> EmitEscalation(bool announce)
         {
-            if (resolved)
-            {
-                // After ESCALATE, the LLM body is internal reasoning — not shown to the user.
-                if (!escalating)
-                {
-                    answer.Append(delta);
-                    yield return BotEvent.TextChunk(delta);
-                }
-                continue;
-            }
-
-            buffer.Append(delta);
-            var text   = buffer.ToString();
-            var newline = text.IndexOf('\n');
-
-            if (newline >= 0)
-            {
-                var prefix = text[..newline].Trim();
-
-                if (ResponseControl.StartsWith(prefix, ResponseControl.Escalate))
-                {
-                    _logger.LogDebug("BotWire: ESCALATE control word detected.");
-                    escalating = resolved = true;
-                    yield return BotEvent.Escalated();
-                    continue; // LLM body after ESCALATE is internal reasoning, not shown to user
-                }
-
-                resolved = true;
-                string emit;
-                if (ResponseControl.StartsWith(prefix, ResponseControl.Answer))
-                {
-                    _logger.LogDebug("BotWire: ANSWER control word detected.");
-                    emit = ResponseControl.Body(text, newline, ResponseControl.Answer);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "BotWire: stream prefix '{Prefix}' is not a recognized control word; failing open as ANSWER.",
-                        prefix.Length > 60 ? prefix[..60] : prefix);
-                    failedOpen = true;
-                    emit = text;
-                }
-
-                EmitDelta(emit, answer);
-                if (emit.Length > 0)
-                    yield return BotEvent.TextChunk(emit);
-
-                continue;
-            }
-
-            if (buffer.Length >= ResponseControl.ScanLimit)
-            {
-                _logger.LogWarning(
-                    "BotWire: no control word in first {Limit} chars; buffer: '{Buffer}'; failing open as ANSWER.",
-                    ResponseControl.ScanLimit,
-                    text.Length > 80 ? text[..80] : text);
-                resolved   = true;
-                failedOpen = true;
-                EmitDelta(text, answer);
-                yield return BotEvent.TextChunk(text);
-            }
-        }
-
-        // After stream: if ESCALATE was detected, either create ticket (contact known) or collect it.
-        if (escalating)
-        {
+            if (announce)
+                yield return BotEvent.Escalated();
             if (contact is not null)
             {
-                _logger.LogDebug("BotWire: ESCALATE — contact already known, creating ticket immediately.");
-                var ticket = await _ticketGenerator.GenerateAsync(
-                    session, message, contact, cancellationToken);
+                var ticket = await _ticketGenerator.GenerateAsync(session, message, contact, cancellationToken);
                 await NotifyAsync(ticket, cancellationToken);
                 var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
                 yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
@@ -260,67 +157,115 @@ public sealed class AnswerProvider : IAnswerProvider
             }
             else
             {
-                _logger.LogDebug("BotWire: ESCALATE — contact unknown, emitting CollectContact.");
                 yield return BotEvent.CollectContact();
             }
+        }
+
+        // ── Attempt 1: stream the answer live ──
+        var reader = new JsonAnswerStreamReader(_options.TopicGuardEnabled);
+        var answer = new StringBuilder();
+        var mode   = StreamMode.Pending;
+        var emitted = false; // true once any non-whitespace message text has been streamed
+
+        await foreach (var delta in _chat.ChatStreamingAsync(messages, jsonObject: true, cancellationToken))
+        {
+            foreach (var output in reader.Feed(delta))
+            {
+                if (output.Kind == JsonAnswerStreamReader.OutputKind.PreludeResolved)
+                {
+                    if (reader.OffTopic && _options.TopicGuardEnabled)
+                    {
+                        _logger.LogDebug("BotWire: message classified off-topic.");
+                        mode = StreamMode.OffTopic;
+                        yield return BotEvent.Blocked(_options.OffTopicResponse);
+                    }
+                    else if (reader.Action == "escalate")
+                    {
+                        _logger.LogDebug("BotWire: action=escalate.");
+                        mode = StreamMode.Escalate;
+                        yield return BotEvent.Escalated();
+                    }
+                    else
+                    {
+                        mode = StreamMode.Answer;
+                    }
+                }
+                else if (output.Kind == JsonAnswerStreamReader.OutputKind.MessageDelta && mode == StreamMode.Answer)
+                {
+                    answer.Append(output.Text);
+                    // Hold leading whitespace so a whitespace-only message streams nothing and can be retried.
+                    if (!emitted)
+                    {
+                        if (string.IsNullOrWhiteSpace(answer.ToString())) continue;
+                        emitted = true;
+                        yield return BotEvent.TextChunk(answer.ToString().TrimStart());
+                    }
+                    else
+                    {
+                        yield return BotEvent.TextChunk(output.Text!);
+                    }
+                }
+            }
+
+            if (reader.Failed)
+                break;
+        }
+        reader.Finish();
+
+        // Good outcomes from attempt 1.
+        if (mode == StreamMode.Escalate)
+        {
+            await foreach (var e in EmitEscalation(announce: false)) yield return e;
+            yield break;
+        }
+        if (mode == StreamMode.OffTopic)
+        {
+            yield return BotEvent.Done(new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: reader.Raw));
+            yield break;
+        }
+        if (mode == StreamMode.Answer && emitted)
+        {
+            yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, answer.ToString().Trim(), RawResponse: reader.Raw));
             yield break;
         }
 
-        // Stream ended before the control word was resolved: a short reply with no trailing newline.
-        if (!resolved)
+        // ── Attempt 1 produced nothing usable (invalid JSON, or empty/whitespace message). ──
+        // Nothing user-visible was streamed, so retry (buffered) before handing off to a human.
+        _logger.LogWarning("BotWire: streamed answer was empty/invalid: '{Raw}'", Truncate(reader.Raw));
+        var attempts = Math.Max(1, _options.MaxAnswerAttempts);
+        for (var attempt = 2; attempt <= attempts; attempt++)
         {
-            var text    = buffer.ToString();
-            var trimmed = text.TrimStart();
+            var raw = await _chat.ChatAsync(messages, jsonObject: true, cancellationToken);
+            var parsed = ParseAnswerJson(raw);
 
-            if (ResponseControl.StartsWith(trimmed, ResponseControl.Escalate))
+            if (parsed.Ok && parsed.OffTopic && _options.TopicGuardEnabled)
             {
-                _logger.LogDebug("BotWire: ESCALATE control word detected (no trailing newline).");
-                yield return BotEvent.Escalated();
-                // LLM body after ESCALATE is internal reasoning, not shown to user.
-
-                if (contact is not null)
-                {
-                    _logger.LogDebug("BotWire: ESCALATE (no newline) — contact known, creating ticket immediately.");
-                    var ticket = await _ticketGenerator.GenerateAsync(
-                        session, message, contact, cancellationToken);
-                    await NotifyAsync(ticket, cancellationToken);
-                    var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
-                    yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
-                    yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
-                }
-                else
-                {
-                    yield return BotEvent.CollectContact();
-                }
+                yield return BotEvent.Blocked(_options.OffTopicResponse);
+                yield return BotEvent.Done(new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: raw));
+                yield break;
+            }
+            if (parsed.Ok && parsed.Action == "escalate")
+            {
+                await foreach (var e in EmitEscalation(announce: true)) yield return e;
+                yield break;
+            }
+            if (parsed.Ok && !string.IsNullOrWhiteSpace(parsed.Message))
+            {
+                yield return BotEvent.TextChunk(parsed.Message);
+                yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, parsed.Message, RawResponse: raw));
                 yield break;
             }
 
-            string emit;
-            if (ResponseControl.StartsWith(trimmed, ResponseControl.Answer))
-            {
-                _logger.LogDebug("BotWire: ANSWER control word detected (no trailing newline).");
-                emit = ResponseControl.Body(text, -1, ResponseControl.Answer);
-            }
-            else
-            {
-                if (text.Length > 0)
-                    _logger.LogWarning(
-                        "BotWire: stream ended with no recognized control word; failing open as ANSWER. Response: '{Response}'",
-                        text.Length > 200 ? text[..200] : text);
-                failedOpen = true;
-                emit = text;
-            }
-
-            EmitDelta(emit, answer);
-            if (emit.Length > 0)
-                yield return BotEvent.TextChunk(emit);
+            _logger.LogWarning(
+                "BotWire: retry answer empty/invalid (attempt {Attempt}/{Max}): '{Raw}'", attempt, attempts, Truncate(raw));
         }
 
-        // When triage just adjudicated the fail-open streak and chose to continue, reset the counter
-        // (FailedOpen = false) so triage does not re-run on every subsequent turn.
-        yield return BotEvent.Done(
-            new AnswerResult(AnswerStatus.Answered, answer.ToString(), FailedOpen: failedOpen && !triageContinued));
+        // Every attempt was empty or invalid — escalate to a human.
+        _logger.LogWarning("BotWire: {Max} answer attempts were all empty/invalid — escalating to a human.", attempts);
+        await foreach (var e in EmitEscalation(announce: true)) yield return e;
     }
+
+    private enum StreamMode { Pending, Answer, Escalate, OffTopic }
 
     private async Task NotifyAsync(SupportTicket ticket, CancellationToken ct)
     {
@@ -346,31 +291,39 @@ public sealed class AnswerProvider : IAnswerProvider
         }
     }
 
-    private async Task<bool> TriageEscalationAsync(
-        ConversationSession session,
-        string currentMessage,
-        CancellationToken ct)
-    {
-        var messages = new List<ChatMessage>(session.SendHistory.Count + 2);
-        // Quote user messages so the triage LLM also treats them as data.
-        foreach (var m in session.SendHistory)
-            messages.Add(m.Role == ChatRole.User ? new(ChatRole.User, QuoteUserMessage(m.Content)) : m);
-        messages.Add(new(ChatRole.User, QuoteUserMessage(currentMessage)));
-        messages.Add(new(ChatRole.System,
-            "Based only on the conversation above: does the customer have a problem that requires " +
-            "a human agent (needs account access, order data, or has explicitly asked to speak to a person)? " +
-            "Reply with exactly one word: YES or NO."));
-        var raw = await _chat.ChatAsync(messages, ct);
-        return raw.Trim().StartsWith("YES", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string QuoteUserMessage(string content) =>
         $"{{\"user_message\": {JsonSerializer.Serialize(content)}}}";
 
-    private static void EmitDelta(string delta, StringBuilder answer)
+    /// <summary>Shortens a raw response for log lines so a long reply does not flood the log.</summary>
+    private static string Truncate(string s) =>
+        s.Length <= 200 ? s : s[..200] + "…";
+
+    /// <summary>
+    /// Parses the answer JSON <c>{offtopic, action, message}</c>. Returns <c>Ok = false</c> when the
+    /// text is not a JSON object, so the caller can fall back to treating it as a plain answer.
+    /// </summary>
+    private static (bool Ok, bool OffTopic, string Action, string Message) ParseAnswerJson(string raw)
     {
-        if (delta.Length > 0)
-            answer.Append(delta);
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return (false, false, "answer", "");
+
+            var offtopic = root.TryGetProperty("offtopic", out var o) && o.ValueKind == JsonValueKind.True;
+            var action = root.TryGetProperty("action", out var a) && a.ValueKind == JsonValueKind.String
+                ? (a.GetString() ?? "answer").Trim().ToLowerInvariant()
+                : "answer";
+            var message = root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
+                ? m.GetString() ?? ""
+                : "";
+            return (true, offtopic, action, message);
+        }
+        catch (JsonException)
+        {
+            return (false, false, "answer", "");
+        }
     }
 
     private static List<ChatMessage> BuildMessages(
@@ -386,16 +339,16 @@ public sealed class AnswerProvider : IAnswerProvider
         foreach (var m in session.SendHistory)
             messages.Add(m.Role == ChatRole.User ? new(ChatRole.User, QuoteUserMessage(m.Content)) : m);
         // Injected just before the user turn — escalates to a critical warning if recent turns
-        // had no control word, since the model is clearly drifting.
+        // were not valid JSON, since the model is clearly drifting.
         var reminder = session.ConsecutiveNoControlWordCount >= 3
-            ? $"CRITICAL ERROR: Your last {session.ConsecutiveNoControlWordCount} replies were ALL missing the required control word. " +
-              $"The application is broken. You MUST start your reply with {ResponseControl.Answer} or " +
-              $"{ResponseControl.Escalate} alone on the very first line — nothing before it, absolutely no exceptions."
+            ? $"CRITICAL ERROR: Your last {session.ConsecutiveNoControlWordCount} replies were NOT the required JSON object. " +
+              "The application is broken. You MUST reply with ONLY the JSON object described in the output format — " +
+              "no markdown, no code fence, no text before or after it, absolutely no exceptions."
             : session.ConsecutiveNoControlWordCount > 0
-            ? $"CRITICAL ERROR: Your previous reply was missing the required control word. " +
-              $"The application broke. You MUST start your reply with {ResponseControl.Answer} or " +
-              $"{ResponseControl.Escalate} alone on the very first line — nothing before it, no exceptions."
-            : $"REMINDER: Your reply MUST start with {ResponseControl.Answer} or {ResponseControl.Escalate} alone on the first line. Nothing before it.";
+            ? "CRITICAL ERROR: Your previous reply was not the required JSON object. " +
+              "The application broke. You MUST reply with ONLY the JSON object described in the output format — " +
+              "no markdown, no text outside it, no exceptions."
+            : "REMINDER: Reply with ONLY the JSON object described in the output format — no markdown, nothing outside it.";
         messages.Add(new(ChatRole.System, reminder));
         messages.Add(new(ChatRole.User, QuoteUserMessage(userMessage)));
         return messages;

@@ -200,10 +200,10 @@ public class TicketGeneratorTests
     private sealed class FakeChat(string response) : ILlmChatClient
     {
         public string Name => "fake";
-        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken ct = default) =>
+        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken ct = default) =>
             Task.FromResult(response);
         public async IAsyncEnumerable<string> ChatStreamingAsync(IReadOnlyList<ChatMessage> messages,
-            [EnumeratorCancellation] CancellationToken ct = default)
+            bool jsonObject = false, [EnumeratorCancellation] CancellationToken ct = default)
         { yield return response; await Task.Yield(); }
     }
 
@@ -211,13 +211,13 @@ public class TicketGeneratorTests
     {
         public string Name => "capturing";
         public IReadOnlyList<ChatMessage>? LastMessages { get; private set; }
-        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken ct = default)
+        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken ct = default)
         {
             LastMessages = messages;
             return Task.FromResult(response);
         }
         public async IAsyncEnumerable<string> ChatStreamingAsync(IReadOnlyList<ChatMessage> messages,
-            [EnumeratorCancellation] CancellationToken ct = default)
+            bool jsonObject = false, [EnumeratorCancellation] CancellationToken ct = default)
         { yield return response; await Task.Yield(); }
     }
 }

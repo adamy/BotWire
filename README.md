@@ -77,9 +77,12 @@ That's it — the bot answers from `docs/faq.md` and raises tickets when it can'
 
 | Property | Default | Description |
 |---|---|---|
-| `TopicDescription` | *(required)* | Short phrase describing your support scope, injected into the system prompt. |
+| `TopicDescription` | *(required)* | Short phrase describing your support scope, injected into the system prompt. Also enables the off-topic guard. |
 | `Documents` | `[]` | Paths to Markdown knowledge-base files. |
-| `ChatProvider` | *(required)* | LLM provider — `ApiKey`, `Model`, optional `BaseUrl` for OpenAI-compatible APIs (e.g. DeepSeek). |
+| `ChatProvider` | *(required)* | LLM provider — `ApiKey`, `Model`, optional `BaseUrl` for OpenAI-compatible APIs (e.g. DeepSeek), optional `Temperature`. |
+| `ChatProvider.Temperature` | `0.2` | Sampling temperature. Low by default for consistent, grounded answers. Set `null` to omit it and use the provider's own default. |
+| `MaxAnswerAttempts` | `3` | How many times to retry an empty/invalid model reply within one turn before handing off to a human. |
+| `OffTopicResponse` | *(built-in)* | Reply shown when the off-topic guard classifies a message outside your support scope. |
 | `MaxMessageLength` | `2000` | Max user message length in characters. |
 | `MaxRequestsPerIpPerMinute` | `20` | IP rate-limit cap. |
 | `SessionTtl` | `2 hours` | Idle session lifetime. |
@@ -97,7 +100,27 @@ builder.Services.AddSingleton<ISystemPromptBuilder, MyPromptBuilder>();
 builder.Services.AddBotWire(opts => { ... });
 ```
 
-`ISystemPromptBuilder.Build(documents)` receives the loaded knowledge-base document contents and must return the complete system prompt. Your implementation **must** preserve the control-word contract: the model's first line must be either `ANSWER` or `ESCALATE` on its own line, otherwise escalation and ticket creation stop working.
+`ISystemPromptBuilder.Build(documents)` receives the loaded knowledge-base document contents and must return the complete system prompt. Your implementation **must** preserve the response contract described below, otherwise escalation, off-topic handling, and ticket creation stop working.
+
+### AI response protocol
+
+The model is required to reply with a single JSON object and nothing else:
+
+```json
+{ "offtopic": false, "action": "answer", "message": "..." }
+```
+
+- **`action`** — `"answer"` (the `message` is shown to the customer) or `"escalate"` (BotWire runs its standard contact-collection flow and ignores `message`).
+- **`offtopic`** — present only when `TopicDescription` is set. When `true`, BotWire shows `OffTopicResponse` instead of the model's text.
+- **`message`** — the customer-facing reply, in the customer's own language.
+
+This is requested via the provider's `response_format: json_object` mode. Field order matters for streaming: BotWire's incremental reader waits until `offtopic`/`action` have arrived before it starts streaming `message` token by token, so the customer never briefly sees an escalation that then disappears. If the model reorders the fields and emits `message` first, the reader streams it as a plain answer.
+
+**Retry and hand-off.** If a reply is not valid JSON, or carries an empty/whitespace-only `message`, BotWire retries up to `MaxAnswerAttempts` times (default 3) within the same turn. Nothing is shown to the customer between attempts. If every attempt is unusable, BotWire escalates to a human rather than show a blank answer.
+
+**Conversation history.** BotWire keeps each assistant turn in two forms: the readable text for ticket generation, and the **raw JSON envelope** in the history it sends back to the model. Replaying the envelope (rather than bare text) keeps the model anchored to the JSON format across long conversations — feeding it plain-text history teaches it to drop the format and reply with bare text or whitespace on later turns. A custom `ISystemPromptBuilder` does not need to handle this; it is internal to the answer pipeline.
+
+A low `ChatProvider.Temperature` (default `0.2`) further stabilises format adherence and keeps grounded answers consistent.
 
 ### Ticket language
 

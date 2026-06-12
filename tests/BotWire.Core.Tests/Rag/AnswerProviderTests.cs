@@ -26,9 +26,10 @@ namespace BotWire.Core.Tests.Rag;
 
 public class AnswerProviderTests
 {
-    private static AnswerProvider CreateProvider(FakeLlmChatClient chat, FakeLlmChatClient? ticketChat = null)
+    private static AnswerProvider CreateProvider(
+        FakeLlmChatClient chat, FakeLlmChatClient? ticketChat = null, bool topicGuard = false)
     {
-        var options = Options.Create(new AnswerProviderOptions());
+        var options = Options.Create(new AnswerProviderOptions { TopicGuardEnabled = topicGuard });
         return new(
             chat,
             new FakeDocumentLoader("doc content"),
@@ -41,6 +42,18 @@ public class AnswerProviderTests
 
     private static ConversationSession EmptySession() => new([], [], DateTimeOffset.UtcNow);
 
+    // ── JSON response builders ──────────────────────────────────────────────────────
+
+    private static string AnswerJson(string message) =>
+        $$"""{"action":"answer","message":"{{message}}"}""";
+
+    private static string EscalateJson(string message = "ok") =>
+        $$"""{"action":"escalate","message":"{{message}}"}""";
+
+    /// <summary>Streaming deltas for an answer whose message value is split into the given parts.</summary>
+    private static string[] AnswerDeltas(params string[] messageParts) =>
+        [.. new[] { "{\"action\":\"answer\",\"message\":\"" }.Concat(messageParts).Append("\"}")];
+
     private static async Task<List<BotEvent>> CollectAsync(IAsyncEnumerable<BotEvent> stream)
     {
         var events = new List<BotEvent>();
@@ -52,23 +65,24 @@ public class AnswerProviderTests
     private static string StreamedText(IEnumerable<BotEvent> events) =>
         string.Concat(events.Where(e => e.Kind == BotEventKind.TextChunk).Select(e => e.Text));
 
-    // ----- Non-streaming -----
+    // ── Non-streaming ───────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task AnswerAsync_AnswerSentinel_StripsSentinelLine()
+    public async Task AnswerAsync_Answer_ReturnsMessage()
     {
-        var provider = CreateProvider(new FakeLlmChatClient("ANSWER\nHello, how can I help?"));
+        var provider = CreateProvider(new FakeLlmChatClient(AnswerJson("Hello, how can I help?")));
 
         var result = await provider.AnswerAsync("hi", EmptySession());
 
         Assert.Equal(AnswerStatus.Answered, result.Status);
         Assert.Equal("Hello, how can I help?", result.Message);
+        Assert.False(result.FailedOpen);
     }
 
     [Fact]
-    public async Task AnswerAsync_EscalateSentinel_ReturnsNeedHuman()
+    public async Task AnswerAsync_Escalate_ReturnsNeedHuman()
     {
-        var provider = CreateProvider(new FakeLlmChatClient("ESCALATE\nThis needs a human."));
+        var provider = CreateProvider(new FakeLlmChatClient(EscalateJson("This needs a human.")));
 
         var result = await provider.AnswerAsync("refund please", EmptySession());
 
@@ -76,37 +90,120 @@ public class AnswerProviderTests
     }
 
     [Fact]
-    public async Task AnswerAsync_NoSentinel_FailsOpenAsAnswered()
+    public async Task AnswerAsync_AllInvalid_EscalatesToHuman()
     {
-        const string raw = "Sure, here is the answer with no sentinel.";
-        var provider = CreateProvider(new FakeLlmChatClient(raw));
+        // Every attempt returns non-JSON → after MaxAnswerAttempts, escalate rather than show garbage.
+        var provider = CreateProvider(new FakeLlmChatClient("not json at all"));
+
+        var result = await provider.AnswerAsync("hi", EmptySession());
+
+        Assert.Equal(AnswerStatus.NeedHuman, result.Status);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_RetriesPastInvalidThenAnswers()
+    {
+        // First response is broken (":"), second is valid → the valid answer is returned.
+        var chat = new SequencedChatClient([":", AnswerJson("hello there")]);
+        var provider = CreateProvider2(chat);
 
         var result = await provider.AnswerAsync("hi", EmptySession());
 
         Assert.Equal(AnswerStatus.Answered, result.Status);
-        Assert.Equal(raw, result.Message);
+        Assert.Equal("hello there", result.Message);
     }
 
-    // ----- Streaming -----
+    [Fact]
+    public async Task AnswerAsync_RetriesPastWhitespaceMessageThenAnswers()
+    {
+        var chat = new SequencedChatClient([AnswerJson("       "), AnswerJson("real answer")]);
+        var provider = CreateProvider2(chat);
+
+        var result = await provider.AnswerAsync("hi", EmptySession());
+
+        Assert.Equal(AnswerStatus.Answered, result.Status);
+        Assert.Equal("real answer", result.Message);
+    }
 
     [Fact]
-    public async Task StreamAsync_AnswerSentinel_DiscardsSentinelAndStreamsTokens()
+    public async Task AnswerAsync_RawResponseRecordedOnResult()
     {
-        var chat = new FakeLlmChatClient("unused", ["ANSWER\n", "Hello", " world"]);
+        var json = AnswerJson("hi");
+        var provider = CreateProvider(new FakeLlmChatClient(json));
+
+        var result = await provider.AnswerAsync("hi", EmptySession());
+
+        Assert.Equal(json, result.RawResponse);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_OffTopic_ReturnsOffTopicResponse_WhenGuardEnabled()
+    {
+        var json = """{"offtopic":true,"action":"answer","message":""}""";
+        var options = new AnswerProviderOptions { TopicGuardEnabled = true, OffTopicResponse = "Out of scope, sorry." };
+        var provider = new AnswerProvider(
+            new FakeLlmChatClient(json),
+            new FakeDocumentLoader("doc"),
+            new TicketGenerator(new FakeLlmChatClient("{}"), Options.Create(options), NullLogger<TicketGenerator>.Instance),
+            [],
+            new DefaultSystemPromptBuilder(Options.Create(options)),
+            Options.Create(options),
+            NullLogger<AnswerProvider>.Instance);
+
+        var result = await provider.AnswerAsync("who won the football?", EmptySession());
+
+        Assert.Equal(AnswerStatus.OffTopic, result.Status);
+        Assert.Equal("Out of scope, sorry.", result.Message);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_OffTopicFlagIgnored_WhenGuardDisabled()
+    {
+        var json = """{"offtopic":true,"action":"answer","message":"actually answered"}""";
+        var provider = CreateProvider(new FakeLlmChatClient(json), topicGuard: false);
+
+        var result = await provider.AnswerAsync("hi", EmptySession());
+
+        Assert.Equal(AnswerStatus.Answered, result.Status);
+        Assert.Equal("actually answered", result.Message);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_SendsSendHistory_NotFullHistory()
+    {
+        var chat = new FakeLlmChatClient(AnswerJson("ok"));
+        var provider = CreateProvider(chat);
+        var session = new ConversationSession(
+            FullHistory: [new(ChatRole.User, "FULL-ONLY-MARKER")],
+            SendHistory: [new(ChatRole.User, "SEND-ONLY-MARKER")],
+            LastActivity: DateTimeOffset.UtcNow);
+
+        await provider.AnswerAsync("now", session);
+
+        Assert.Contains(chat.LastMessages!, m => m.Content.Contains("SEND-ONLY-MARKER"));
+        Assert.DoesNotContain(chat.LastMessages!, m => m.Content.Contains("FULL-ONLY-MARKER"));
+    }
+
+    // ── Streaming ───────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task StreamAsync_Answer_StreamsMessageTokensOnly()
+    {
+        var chat = new FakeLlmChatClient("unused", AnswerDeltas("Hello", " world"));
         var provider = CreateProvider(chat);
 
         var events = await CollectAsync(provider.StreamAsync("hi", EmptySession()));
 
-        Assert.DoesNotContain(events, e => (e.Text ?? "").Contains("ANSWER"));
+        Assert.DoesNotContain(events, e => (e.Text ?? "").Contains("action"));
         Assert.Equal("Hello world", StreamedText(events));
         Assert.Equal(BotEventKind.Done, events[^1].Kind);
         Assert.Equal("Hello world", events[^1].Result!.Message);
     }
 
     [Fact]
-    public async Task StreamAsync_EscalateSentinel_EmitsEscalateAndCollectContactNoContent()
+    public async Task StreamAsync_Escalate_EmitsEscalateAndCollectContactNoContent()
     {
-        var chat = new FakeLlmChatClient("unused", ["ESCALATE\n", "internal reason that must not leak"]);
+        var chat = new FakeLlmChatClient("unused", [EscalateJson("internal reason")]);
         var provider = CreateProvider(chat);
 
         var events = await CollectAsync(provider.StreamAsync("refund", EmptySession()));
@@ -120,7 +217,7 @@ public class AnswerProviderTests
     [Fact]
     public async Task StreamAsync_EscalateSplitAcrossDeltas_StillSuppressesContent()
     {
-        var chat = new FakeLlmChatClient("unused", ["ESC", "ALATE", "\n", "leaky text"]);
+        var chat = new FakeLlmChatClient("unused", ["{\"action\":\"esc", "alate\",\"mess", "age\":\"leak\"}"]);
         var provider = CreateProvider(chat);
 
         var events = await CollectAsync(provider.StreamAsync("x", EmptySession()));
@@ -131,49 +228,49 @@ public class AnswerProviderTests
     }
 
     [Fact]
-    public async Task StreamAsync_NoNewlineWithinScanLimit_FailsOpenAndStreams()
+    public async Task StreamAsync_AllInvalid_EscalatesToHuman()
     {
-        // 26 chars, no newline, no sentinel -> fail open after the 20-char scan limit.
-        var chat = new FakeLlmChatClient("unused", ["abcdefghijklmnopqrstuvwxyz"]);
+        // Non-JSON every attempt: nothing is streamed and the turn escalates (CollectContact, no answer).
+        var chat = new FakeLlmChatClient("not json", ["abcdefghijklmnopqrstuvwxyz"]);
         var provider = CreateProvider(chat);
 
         var events = await CollectAsync(provider.StreamAsync("x", EmptySession()));
 
-        Assert.Equal("abcdefghijklmnopqrstuvwxyz", StreamedText(events));
+        Assert.DoesNotContain(events, e => e.Kind == BotEventKind.TextChunk);
+        Assert.Contains(events, e => e.Kind == BotEventKind.Escalated);
+        Assert.Contains(events, e => e.Kind == BotEventKind.CollectContact);
+    }
+
+    [Fact]
+    public async Task StreamAsync_WhitespaceMessageThenRetryAnswers()
+    {
+        // Attempt 1 streams a whitespace-only message (nothing shown); the buffered retry answers.
+        var chat = new SequencedChatClient([AnswerJson("    "), AnswerJson("real reply")]);
+        var provider = CreateProvider2(chat);
+
+        var events = await CollectAsync(provider.StreamAsync("x", EmptySession()));
+
+        Assert.Equal("real reply", StreamedText(events));
         Assert.Equal(BotEventKind.Done, events[^1].Kind);
         Assert.Equal(AnswerStatus.Answered, events[^1].Result!.Status);
     }
 
     [Fact]
-    public async Task StreamAsync_EscalateWithoutTrailingNewline_SuppressesContent()
+    public async Task StreamAsync_OffTopic_EmitsBlockedAndDone_WhenGuardEnabled()
     {
-        var chat = new FakeLlmChatClient("unused", ["ESCALATE"]);
-        var provider = CreateProvider(chat);
+        var json = """{"offtopic":true,"action":"answer","message":"x"}""";
+        var chat = new FakeLlmChatClient("unused", [json]);
+        var provider = CreateProvider(chat, topicGuard: true);
 
-        var events = await CollectAsync(provider.StreamAsync("x", EmptySession()));
+        var events = await CollectAsync(provider.StreamAsync("off topic", EmptySession()));
 
-        Assert.Equal(2, events.Count);
-        Assert.Equal(BotEventKind.Escalated, events[0].Kind);
-        Assert.Equal(BotEventKind.CollectContact, events[1].Kind);
+        Assert.Contains(events, e => e.Kind == BotEventKind.Blocked);
+        Assert.DoesNotContain(events, e => e.Kind == BotEventKind.TextChunk);
+        Assert.Equal(BotEventKind.Done, events[^1].Kind);
+        Assert.Equal(AnswerStatus.OffTopic, events[^1].Result!.Status);
     }
 
-    [Fact]
-    public async Task AnswerAsync_SendsSendHistory_NotFullHistory()
-    {
-        var chat = new FakeLlmChatClient("ANSWER\nok");
-        var provider = CreateProvider(chat);
-        var session = new ConversationSession(
-            FullHistory: [new(ChatRole.User, "FULL-ONLY-MARKER")],
-            SendHistory: [new(ChatRole.User, "SEND-ONLY-MARKER")],
-            LastActivity: DateTimeOffset.UtcNow);
-
-        await provider.AnswerAsync("now", session);
-
-        Assert.Contains(chat.LastMessages!, m => m.Content.Contains("SEND-ONLY-MARKER"));
-        Assert.DoesNotContain(chat.LastMessages!, m => m.Content.Contains("FULL-ONLY-MARKER"));
-    }
-
-    // ----- Escalation lifecycle -----
+    // ── Escalation lifecycle ────────────────────────────────────────────────────────
 
     [Fact]
     public async Task StreamAsync_EscalationPendingWithContact_EmitsTicketConfirmedAndDone()
@@ -211,37 +308,34 @@ public class AnswerProviderTests
     [Fact]
     public async Task StreamAsync_EscalationPendingWithoutContact_FallsThroughToNormalRag()
     {
-        var chat = new FakeLlmChatClient("ANSWER\nHere is your answer.");
+        var chat = new FakeLlmChatClient("unused", AnswerDeltas("Here is your answer."));
         var provider = CreateProvider(chat);
         var session = new ConversationSession([], [], DateTimeOffset.UtcNow, EscalationPending: true);
 
-        // No contact supplied — should NOT generate ticket, should run normal RAG
         var events = await CollectAsync(provider.StreamAsync("hello", session, contact: null));
 
         Assert.Equal(BotEventKind.Done, events[^1].Kind);
         Assert.Contains(events, e => e.Kind == BotEventKind.TextChunk);
     }
 
-    // ---- Escalation Flow Tests ----
+    // ── Escalation flow ─────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task StreamAsync_EscalateDetected_EmitsCollectContactWhenNoContact()
     {
-        var chat = new FakeLlmChatClient("ESCALATE\nYou'll need to speak to a human.");
+        var chat = new FakeLlmChatClient("unused", [EscalateJson("speak to a human")]);
         var provider = CreateProvider(chat);
         var events = await CollectAsync(provider.StreamAsync("issue", EmptySession(), contact: null));
 
-        // Should emit Escalated then CollectContact (no TicketConfirmed without contact)
         Assert.Contains(events, e => e.Kind == BotEventKind.Escalated);
         Assert.Contains(events, e => e.Kind == BotEventKind.CollectContact);
-        // No TextChunk for ESCALATE body
         Assert.DoesNotContain(events, e => e.Kind == BotEventKind.TextChunk);
     }
 
     [Fact]
     public async Task AnswerAsync_EscalateDetected_NoContactReturnsNeedHuman()
     {
-        var chat = new FakeLlmChatClient("ESCALATE\nConnect with support.");
+        var chat = new FakeLlmChatClient(EscalateJson("Connect with support."));
         var provider = CreateProvider(chat);
         var result = await provider.AnswerAsync("problem", EmptySession(), contact: null);
 
@@ -251,14 +345,13 @@ public class AnswerProviderTests
     [Fact]
     public async Task StreamAsync_EscalateWithContactProvided_GeneratesTicket()
     {
-        var chat = new FakeLlmChatClient("ESCALATE\nI'll connect you.");
+        var chat = new FakeLlmChatClient("unused", [EscalateJson("connecting you")]);
         var ticketChat = new FakeLlmChatClient("""{"summary":"Broken feature","details":"User reports issue","priority":"medium"}""");
         var provider = CreateProvider(chat, ticketChat);
         var contact = new ContactInfo("user@example.com", null, "John", "john99");
 
         var events = await CollectAsync(provider.StreamAsync("urgent problem", EmptySession(), contact));
 
-        // Should emit: Escalated, TicketConfirmed, Done (no CollectContact)
         Assert.Equal(BotEventKind.Escalated, events[0].Kind);
         Assert.Contains(events, e => e.Kind == BotEventKind.TicketConfirmed);
         Assert.DoesNotContain(events, e => e.Kind == BotEventKind.CollectContact);
@@ -267,9 +360,7 @@ public class AnswerProviderTests
     [Fact]
     public async Task AnswerAsync_EscalateResponse_ReturnsNeedHumanNotTicket()
     {
-        // When LLM says ESCALATE, AnswerAsync returns NeedHuman (not immediate ticket).
-        // Ticket is only created when EscalationPending && contact supplied (step 2 of flow).
-        var chat = new FakeLlmChatClient("ESCALATE\nI'll help.");
+        var chat = new FakeLlmChatClient(EscalateJson("I'll help."));
         var provider = CreateProvider(chat);
         var contact = new ContactInfo("test@example.com", null, "Alice", null);
 
@@ -281,70 +372,50 @@ public class AnswerProviderTests
     [Fact]
     public async Task StreamAsync_EscalateWithNullContactEmail_StillGeneratesTicket()
     {
-        var chat = new FakeLlmChatClient("ESCALATE\nConnecting you...");
+        var chat = new FakeLlmChatClient("unused", [EscalateJson("connecting you")]);
         var ticketChat = new FakeLlmChatClient("""{"summary":"Support needed","details":"Issue reported","priority":"medium"}""");
         var provider = CreateProvider(chat, ticketChat);
-        // Contact object exists but Email is null — ticket is still generated with null email
         var contact = new ContactInfo(null, null, "Jane");
 
         var events = await CollectAsync(provider.StreamAsync("issue", EmptySession(), contact));
 
-        // Should generate ticket even with null email (contact object exists)
         Assert.Contains(events, e => e.Kind == BotEventKind.TicketConfirmed);
         Assert.DoesNotContain(events, e => e.Kind == BotEventKind.CollectContact);
     }
 
-    [Fact]
-    public async Task AnswerAsync_NoContactEmail_ReturnsNeedHuman()
-    {
-        var chat = new FakeLlmChatClient("ESCALATE\nWe need your email.");
-        var provider = CreateProvider(chat);
-        var result = await provider.AnswerAsync("help", EmptySession(), contact: null);
+    // ── Sequenced fake (returns a different response per call, for retry tests) ──────
 
-        Assert.Equal(AnswerStatus.NeedHuman, result.Status);
+    private static AnswerProvider CreateProvider2(ILlmChatClient chat)
+    {
+        var options = Options.Create(new AnswerProviderOptions());
+        return new(
+            chat,
+            new FakeDocumentLoader("doc content"),
+            new TicketGenerator(chat, options, NullLogger<TicketGenerator>.Instance),
+            [],
+            new DefaultSystemPromptBuilder(options),
+            options,
+            NullLogger<AnswerProvider>.Instance);
     }
 
-    [Fact]
-    public async Task StreamAsync_FailOpenThenEscalate_IncrementsConsecutiveCount()
+    private sealed class SequencedChatClient(IReadOnlyList<string> responses) : ILlmChatClient
     {
-        // First request: no sentinel → fail-open, count becomes 1
-        var badChat = new FakeLlmChatClient("random text no sentinel");
-        var provider = CreateProvider(badChat);
-        var session1 = EmptySession();
+        private int _index;
 
-        var result1 = await provider.AnswerAsync("msg1", session1);
+        public string Name => "sequenced";
 
-        Assert.False(result1.FailedOpen == false); // FailedOpen should be true
-        // Note: FailedOpen flag exists, but ConsecutiveNoControlWordCount is session-level,
-        // not returned from AnswerAsync. Would be tested at service layer.
-    }
+        private string Next() => responses[Math.Min(_index++, responses.Count - 1)];
 
-    [Fact]
-    public async Task AnswerAsync_TriageNoEscalation_ResetsFailOpenCounter()
-    {
-        // Fake returns no control word: triage replies non-YES (no escalation) AND the answer
-        // itself fails open. Because triage adjudicated the streak, FailedOpen must reset to false
-        // so triage does not re-run on every subsequent turn.
-        var chat = new FakeLlmChatClient("no control word here");
-        var provider = CreateProvider(chat);
-        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, ConsecutiveNoControlWordCount: 3);
+        public Task<string> ChatAsync(
+            IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken ct = default)
+            => Task.FromResult(Next());
 
-        var result = await provider.AnswerAsync("hi", session);
-
-        Assert.Equal(AnswerStatus.Answered, result.Status);
-        Assert.False(result.FailedOpen);
-    }
-
-    [Fact]
-    public async Task StreamAsync_TriageNoEscalation_ResetsFailOpenCounterOnDone()
-    {
-        var chat = new FakeLlmChatClient("no control word here");
-        var provider = CreateProvider(chat);
-        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, ConsecutiveNoControlWordCount: 3);
-
-        var events = await CollectAsync(provider.StreamAsync("hi", session));
-
-        var done = events.Single(e => e.Kind == BotEventKind.Done);
-        Assert.False(done.Result!.FailedOpen);
+        public async IAsyncEnumerable<string> ChatStreamingAsync(
+            IReadOnlyList<ChatMessage> messages, bool jsonObject = false,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            yield return Next();
+            await Task.CompletedTask;
+        }
     }
 }

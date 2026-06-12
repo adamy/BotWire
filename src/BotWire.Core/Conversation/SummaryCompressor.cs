@@ -100,7 +100,7 @@ public sealed class SummaryCompressor : ISummaryCompressor
             "Summarize the support conversation above in one sentence so it can be used as context " +
             "for the rest of the chat. Reply with only the summary sentence."));
 
-        var raw = await _chat.ChatAsync(prompt, ct);
+        var raw = await _chat.ChatAsync(prompt, jsonObject: false, ct);
         return raw.Trim();
     }
 

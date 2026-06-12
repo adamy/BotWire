@@ -36,4 +36,11 @@ public sealed class OpenAILlmClientOptions
     /// When <see langword="null"/>, the default OpenAI endpoint is used.
     /// </summary>
     public string? BaseUrl { get; set; }
+
+    /// <summary>
+    /// Sampling temperature for chat completions. Defaults to <c>0.2</c> (low, for consistent
+    /// grounded answers). When <see langword="null"/>, the parameter is omitted and the provider's
+    /// own default applies.
+    /// </summary>
+    public float? Temperature { get; set; } = 0.2f;
 }

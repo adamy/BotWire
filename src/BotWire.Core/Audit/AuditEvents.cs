@@ -32,13 +32,14 @@ public static class AuditEvents
             ["content"] = content,
         });
 
-    /// <summary>An assistant reply, with its text and optionally the time taken to produce it.</summary>
+    /// <summary>An assistant reply: the shown text, the full raw model response, and optional timing.</summary>
     public static AuditEvent AssistantMessage(
-        string sessionId, string content, long? latencyMs = null, string? provider = null) =>
+        string sessionId, string content, string? raw = null, long? latencyMs = null, string? provider = null) =>
         new(DateTimeOffset.UtcNow, AuditEventType.Message, sessionId, new Dictionary<string, object?>
         {
             ["role"] = "assistant",
             ["content"] = content,
+            ["raw"] = raw,
             ["provider"] = provider,
             ["latencyMs"] = latencyMs,
         });

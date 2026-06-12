@@ -40,17 +40,17 @@ public class ChatEndpointTests
     }
 
     [SkipIfNoApiKeyFact]
-    public async Task OffTopic_ReturnsAnswered()
+    public async Task OffTopic_ReturnsOffTopic()
     {
-        // Off-topic messages → ANSWER (politely redirect), not ESCALATE.
-        // ESCALATE is reserved for support issues requiring human account/order access.
+        // The test host sets a TopicDescription, so the merged topic guard is active: clearly
+        // off-topic messages are blocked with the OffTopic status, not answered or escalated.
         await using var host = await BotWireTestHost.CreateAsync();
         var resp = await host.Client.PostAsJsonAsync("/support/chat",
             new ChatRequest { Message = "What is the current stock price of Apple?" });
         resp.EnsureSuccessStatusCode();
 
         var body = await resp.Content.ReadFromJsonAsync<ChatResponse>();
-        Assert.Equal("Answered", body!.Status);
+        Assert.Equal("OffTopic", body!.Status);
     }
 
     /// <summary>

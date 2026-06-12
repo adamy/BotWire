@@ -26,6 +26,12 @@ public enum AnswerStatus
     NeedHuman,
 
     /// <summary>
+    /// The message was classified off-topic by the topic guard. The configured off-topic response
+    /// is shown and the message is not answered from the knowledge base.
+    /// </summary>
+    OffTopic,
+
+    /// <summary>
     /// A support ticket was created after the user supplied contact details.
     /// Callers must clear <see cref="BotWire.Core.Models.ConversationSession.EscalationPending"/> on the
     /// stored session to prevent duplicate ticket generation on the next call.

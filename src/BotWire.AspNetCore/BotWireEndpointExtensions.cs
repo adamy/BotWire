@@ -126,6 +126,7 @@ public static class BotWireEndpointExtensions
         var escalationStarted = false;
         var failedOpen        = false;
         string? confirmedTicketId = null;
+        string? rawResponse       = null;
 
         try
         {
@@ -156,7 +157,8 @@ public static class BotWireEndpointExtensions
                         break;
 
                     case BotEventKind.Done:
-                        failedOpen = evt.Result?.FailedOpen ?? false;
+                        failedOpen  = evt.Result?.FailedOpen ?? false;
+                        rawResponse = evt.Result?.RawResponse;
                         await WriteSseAsync(response, "[DONE]");
                         break;
 
@@ -179,7 +181,8 @@ public static class BotWireEndpointExtensions
         }
 
         await service.CommitStreamAsync(
-            prep, textBuffer.ToString(), escalationStarted, confirmedTicketId, failedOpen, context.RequestAborted);
+            prep, textBuffer.ToString(), escalationStarted, confirmedTicketId, failedOpen,
+            rawResponse, context.RequestAborted);
     }
 
     // ── GET /botwire/widget.js ──────────────────────────────────────────────────

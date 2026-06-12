@@ -66,6 +66,7 @@ public static class BotWireServiceCollectionExtensions
                 llmOpts.ChatModel      = bw.ChatProvider.Model;
                 llmOpts.EmbeddingModel = bw.EmbeddingProvider?.Model ?? "text-embedding-3-small";
                 llmOpts.BaseUrl        = bw.ChatProvider.BaseUrl;
+                llmOpts.Temperature    = bw.ChatProvider.Temperature;
             });
 
         services.AddSingleton<OpenAILlmClient>();
@@ -116,6 +117,9 @@ public static class BotWireServiceCollectionExtensions
             o.TicketLanguage          = opts.TicketLanguage;
             o.TicketConfirmedMessage  = opts.TicketConfirmedMessage;
             o.OnTicketCreated         = opts.OnTicketCreated;
+            o.OffTopicResponse        = opts.OffTopicResponse;
+            o.TopicGuardEnabled       = !string.IsNullOrWhiteSpace(opts.TopicDescription);
+            o.MaxAnswerAttempts       = opts.MaxAnswerAttempts;
         });
 
         // ── Session tokens ──────────────────────────────────────────────────────

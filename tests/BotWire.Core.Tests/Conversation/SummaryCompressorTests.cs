@@ -113,7 +113,8 @@ public class SummaryCompressorTests
 
         public string Name => "capturing";
 
-        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
+        public Task<string> ChatAsync(
+            IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken cancellationToken = default)
         {
             Calls++;
             LastMessages = messages;
@@ -122,6 +123,7 @@ public class SummaryCompressorTests
 
         public async IAsyncEnumerable<string> ChatStreamingAsync(
             IReadOnlyList<ChatMessage> messages,
+            bool jsonObject = false,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             await Task.Yield();

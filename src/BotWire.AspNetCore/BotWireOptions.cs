@@ -86,6 +86,21 @@ public sealed class BotWireOptions
     public string ErrorMessage { get; set; } = "Something went wrong. Please try again.";
 
     /// <summary>
+    /// Reply shown when a message is classified off-topic. Only takes effect when
+    /// <see cref="TopicDescription"/> is set (which enables the topic guard).
+    /// </summary>
+    public string OffTopicResponse { get; set; } =
+        "I'm sorry, I can only help with questions related to our support topics. " +
+        "Is there something along those lines I can help you with?";
+
+    /// <summary>
+    /// Maximum number of LLM attempts for a single turn when the response is empty or invalid
+    /// (malformed JSON or a blank message). After this many failures the turn escalates to a human
+    /// instead of showing a blank answer. Defaults to 3.
+    /// </summary>
+    public int MaxAnswerAttempts { get; set; } = 3;
+
+    /// <summary>
     /// Message shown to the customer in the widget after a support ticket is confirmed.
     /// Use <c>{ticketId}</c> as a placeholder for the ticket identifier.
     /// Defaults to <c>"✓ Support ticket {ticketId} created — we'll be in touch soon."</c>.

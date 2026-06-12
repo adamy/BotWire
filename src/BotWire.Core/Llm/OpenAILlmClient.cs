@@ -38,6 +38,7 @@ public sealed class OpenAILlmClient : ILlmClient
     private readonly ILogger<OpenAILlmClient> _logger;
     private readonly bool _hasCustomBaseUrl;
     private readonly string _baseUrl;
+    private readonly float? _temperature;
 
     /// <summary>Initializes a new instance using the provided options.</summary>
     /// <param name="options">Bound options containing API key and model names.</param>
@@ -50,6 +51,7 @@ public sealed class OpenAILlmClient : ILlmClient
 
         _hasCustomBaseUrl = !string.IsNullOrWhiteSpace(opts.BaseUrl);
         _baseUrl = _hasCustomBaseUrl ? opts.BaseUrl! : "https://api.openai.com";
+        _temperature = opts.Temperature;
 
         if (_hasCustomBaseUrl)
         {
@@ -71,20 +73,24 @@ public sealed class OpenAILlmClient : ILlmClient
     /// <inheritdoc/>
     public async Task<string> ChatAsync(
         IReadOnlyList<BotWireChatMessage> messages,
+        bool jsonObject = false,
         CancellationToken cancellationToken = default)
     {
         var oaiMessages = MapMessages(messages);
-        ChatCompletion completion = await _chatClient.CompleteChatAsync(oaiMessages, cancellationToken: cancellationToken);
+        var options = BuildOptions(jsonObject);
+        ChatCompletion completion = await _chatClient.CompleteChatAsync(oaiMessages, options, cancellationToken);
         return completion.Content.Count > 0 ? completion.Content[0].Text : string.Empty;
     }
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<string> ChatStreamingAsync(
         IReadOnlyList<BotWireChatMessage> messages,
+        bool jsonObject = false,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var oaiMessages = MapMessages(messages);
-        var stream = _chatClient.CompleteChatStreamingAsync(oaiMessages, cancellationToken: cancellationToken);
+        var options = BuildOptions(jsonObject);
+        var stream = _chatClient.CompleteChatStreamingAsync(oaiMessages, options, cancellationToken);
 
         await foreach (StreamingChatCompletionUpdate update in stream)
         {
@@ -107,6 +113,19 @@ public sealed class OpenAILlmClient : ILlmClient
 
         OpenAIEmbedding embedding = await _embeddingClient.GenerateEmbeddingAsync(text, cancellationToken: cancellationToken);
         return embedding.ToFloats().ToArray();
+    }
+
+    private ChatCompletionOptions? BuildOptions(bool jsonObject)
+    {
+        if (!jsonObject && _temperature is null)
+            return null;
+
+        var options = new ChatCompletionOptions();
+        if (jsonObject)
+            options.ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat();
+        if (_temperature is { } t)
+            options.Temperature = t;
+        return options;
     }
 
     private static OpenAI.Chat.ChatMessage ToOpenAiMessage(BotWireChatMessage msg) =>

@@ -21,15 +21,24 @@ namespace BotWire.Core.Tests.Rag;
 
 public class DefaultSystemPromptBuilderTests
 {
-    private static DefaultSystemPromptBuilder Create(string? preamble = null) =>
-        new(Options.Create(new AnswerProviderOptions { SystemPromptPreamble = preamble }));
+    private static DefaultSystemPromptBuilder Create(string? preamble = null, bool topicGuard = false) =>
+        new(Options.Create(new AnswerProviderOptions { SystemPromptPreamble = preamble, TopicGuardEnabled = topicGuard }));
 
     [Fact]
-    public void Build_EmitsBothControlWords()
+    public void Build_RequiresJsonActionFormat()
     {
         var prompt = Create().Build(["doc"]);
-        Assert.Contains("ANSWER", prompt);
-        Assert.Contains("ESCALATE", prompt);
+        Assert.Contains("JSON", prompt);
+        Assert.Contains("\"action\"", prompt);
+        Assert.Contains("answer", prompt);
+        Assert.Contains("escalate", prompt);
+    }
+
+    [Fact]
+    public void Build_IncludesOffTopicField_OnlyWhenTopicGuardEnabled()
+    {
+        Assert.DoesNotContain("offtopic", Create(topicGuard: false).Build(["doc"]));
+        Assert.Contains("offtopic", Create(topicGuard: true).Build(["doc"]));
     }
 
     [Fact]

@@ -19,10 +19,9 @@ using BotWire.Core.Enums;
 namespace BotWire.Core.Models;
 
 /// <summary>The outcome of a bot answer attempt.</summary>
-/// <param name="Status">Whether the bot answered or needs to escalate.</param>
+/// <param name="Status">Whether the bot answered, needs to escalate, or was off-topic.</param>
 /// <param name="Message">The bot's response text.</param>
-/// <param name="FailedOpen">
-/// True when no ANSWER / ESCALATE control word was found and the provider fell back to treating
-/// the response as an ANSWER. The next turn should inject a stricter reminder.
-/// </param>
-public sealed record AnswerResult(AnswerStatus Status, string Message, bool FailedOpen = false);
+/// <param name="FailedOpen">Reserved; currently always false (the provider retries instead of failing open).</param>
+/// <param name="RawResponse">The full, unparsed LLM response (the answer JSON), for audit logging.</param>
+public sealed record AnswerResult(
+    AnswerStatus Status, string Message, bool FailedOpen = false, string? RawResponse = null);
