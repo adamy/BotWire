@@ -208,9 +208,10 @@ public class AnswerProviderTests
 
         var events = await CollectAsync(provider.StreamAsync("refund", EmptySession()));
 
-        Assert.Equal(2, events.Count);
+        Assert.Equal(3, events.Count);
         Assert.Equal(BotEventKind.Escalated, events[0].Kind);
-        Assert.Equal(BotEventKind.CollectContact, events[1].Kind);
+        Assert.Equal(BotEventKind.Usage, events[1].Kind); // token accounting before the contact prompt
+        Assert.Equal(BotEventKind.CollectContact, events[2].Kind);
         Assert.DoesNotContain(events, e => e.Kind == BotEventKind.TextChunk);
     }
 
@@ -222,9 +223,10 @@ public class AnswerProviderTests
 
         var events = await CollectAsync(provider.StreamAsync("x", EmptySession()));
 
-        Assert.Equal(2, events.Count);
+        Assert.Equal(3, events.Count);
         Assert.Equal(BotEventKind.Escalated, events[0].Kind);
-        Assert.Equal(BotEventKind.CollectContact, events[1].Kind);
+        Assert.Equal(BotEventKind.Usage, events[1].Kind);
+        Assert.Equal(BotEventKind.CollectContact, events[2].Kind);
     }
 
     [Fact]
@@ -283,11 +285,12 @@ public class AnswerProviderTests
 
         var events = await CollectAsync(provider.StreamAsync("contact submitted", session, contact));
 
-        Assert.Equal(2, events.Count);
-        Assert.Equal(BotEventKind.TicketConfirmed, events[0].Kind);
-        Assert.Equal(BotEventKind.Done, events[1].Kind);
-        Assert.Equal(AnswerStatus.TicketCreated, events[1].Result!.Status);
-        Assert.NotNull(events[0].TicketId);
+        Assert.Equal(3, events.Count);
+        Assert.Equal(BotEventKind.Usage, events[0].Kind); // ticket-summarisation tokens
+        Assert.Equal(BotEventKind.TicketConfirmed, events[1].Kind);
+        Assert.Equal(BotEventKind.Done, events[2].Kind);
+        Assert.Equal(AnswerStatus.TicketCreated, events[2].Result!.Status);
+        Assert.NotNull(events[1].TicketId);
     }
 
     [Fact]
@@ -406,15 +409,16 @@ public class AnswerProviderTests
 
         private string Next() => responses[Math.Min(_index++, responses.Count - 1)];
 
-        public Task<string> ChatAsync(
+        public Task<LlmChatResult> ChatAsync(
             IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken ct = default)
-            => Task.FromResult(Next());
+            => Task.FromResult(new LlmChatResult(Next()));
 
         public async IAsyncEnumerable<string> ChatStreamingAsync(
-            IReadOnlyList<ChatMessage> messages, bool jsonObject = false,
+            IReadOnlyList<ChatMessage> messages, bool jsonObject = false, Action<int>? onUsage = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             yield return Next();
+            onUsage?.Invoke(0);
             await Task.CompletedTask;
         }
     }

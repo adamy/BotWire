@@ -32,9 +32,9 @@ public static class AuditEvents
             ["content"] = content,
         });
 
-    /// <summary>An assistant reply: the shown text, the full raw model response, and optional timing.</summary>
+    /// <summary>An assistant reply: the shown text, the full raw model response, optional timing, and token usage.</summary>
     public static AuditEvent AssistantMessage(
-        string sessionId, string content, string? raw = null, long? latencyMs = null, string? provider = null) =>
+        string sessionId, string content, string? raw = null, long? latencyMs = null, string? provider = null, int? tokens = null) =>
         new(DateTimeOffset.UtcNow, AuditEventType.Message, sessionId, new Dictionary<string, object?>
         {
             ["role"] = "assistant",
@@ -42,6 +42,7 @@ public static class AuditEvents
             ["raw"] = raw,
             ["provider"] = provider,
             ["latencyMs"] = latencyMs,
+            ["tokens"] = tokens,
         });
 
     /// <summary>A guard rejected a message before it reached the model.</summary>
@@ -52,11 +53,12 @@ public static class AuditEvents
         });
 
     /// <summary>A support ticket was raised, or escalation began awaiting contact details.</summary>
-    public static AuditEvent Escalated(string sessionId, string reason, string? ticketId = null) =>
+    public static AuditEvent Escalated(string sessionId, string reason, string? ticketId = null, int? tokens = null) =>
         new(DateTimeOffset.UtcNow, AuditEventType.Escalated, sessionId, new Dictionary<string, object?>
         {
             ["reason"] = reason,
             ["ticketId"] = ticketId,
+            ["tokens"] = tokens,
         });
 
     /// <summary>A rate-limit dimension capped or rejected the request.</summary>

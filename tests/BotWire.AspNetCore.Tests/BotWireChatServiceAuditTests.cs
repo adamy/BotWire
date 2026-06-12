@@ -35,6 +35,16 @@ public class BotWireChatServiceAuditTests
         var rateLimiter = new IpRateLimiter(
             Options.Create(new RateLimiterOptions { MaxRequestsPerIpPerMinute = maxRpm }));
 
+        // Five-dimension limiter disabled so it never affects audit-trail assertions here.
+        var rlOptions = Options.Create(new RateLimitOptions
+        {
+            MaxConcurrentSessions = 0,
+            MaxMessagesPerMinute = 0,
+            MaxMessagesPerSession = 0,
+            MaxSessionsPerIpPerHour = 0,
+            DailyTokenBudget = 0,
+        });
+
         var svc = new BotWireChatService(
             answers,
             store,
@@ -42,6 +52,8 @@ public class BotWireChatServiceAuditTests
             piiBlocks ? FakePiiGuard.Block : FakePiiGuard.Allow,
             NullPromptInjectionGuard.Instance,
             rateLimiter,
+            new RateLimiter(rlOptions),
+            rlOptions,
             new FakeSummaryCompressor(),
             audit,
             Options.Create(new BotWireOptions()),

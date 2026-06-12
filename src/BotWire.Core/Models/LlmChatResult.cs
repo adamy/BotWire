@@ -14,15 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-using BotWire.Core.Enums;
-
 namespace BotWire.Core.Models;
 
-/// <summary>The outcome of a bot answer attempt.</summary>
-/// <param name="Status">Whether the bot answered, needs to escalate, or was off-topic.</param>
-/// <param name="Message">The bot's response text.</param>
-/// <param name="FailedOpen">Reserved; currently always false (the provider retries instead of failing open).</param>
-/// <param name="RawResponse">The full, unparsed LLM response (the answer JSON), for audit logging.</param>
-/// <param name="TokensUsed">Total tokens billed for the LLM call(s) behind this answer; <c>0</c> when unreported.</param>
-public sealed record AnswerResult(
-    AnswerStatus Status, string Message, bool FailedOpen = false, string? RawResponse = null, int TokensUsed = 0);
+/// <summary>
+/// The result of a non-streaming chat completion: the reply text plus the total token
+/// count the provider reported for the call (prompt + completion). <see cref="TotalTokens"/>
+/// is <c>0</c> when the provider did not report usage.
+/// </summary>
+/// <param name="Text">The LLM's full response text.</param>
+/// <param name="TotalTokens">Total tokens billed for the call, or <c>0</c> when unknown.</param>
+public sealed record LlmChatResult(string Text, int TotalTokens = 0);

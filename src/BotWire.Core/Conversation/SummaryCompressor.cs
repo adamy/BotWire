@@ -101,7 +101,7 @@ public sealed class SummaryCompressor : ISummaryCompressor
             "for the rest of the chat. Reply with only the summary sentence."));
 
         var raw = await _chat.ChatAsync(prompt, jsonObject: false, ct);
-        return raw.Trim();
+        return raw.Text.Trim();
     }
 
     internal static bool IsSummary(ChatMessage message) =>

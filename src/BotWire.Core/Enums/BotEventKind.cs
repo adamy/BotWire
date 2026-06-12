@@ -39,4 +39,12 @@ public enum BotEventKind
 
     /// <summary>An error occurred during processing.</summary>
     Error,
+
+    /// <summary>
+    /// Reports the token usage for the turn. Carried by <see cref="BotWire.Core.Models.BotEvent.TokensUsed"/>.
+    /// Internal accounting only (rate-limit budget + audit); not rendered to the client. Used by paths
+    /// that have no <see cref="Done"/> event to surface usage on, e.g. escalation that ends in a
+    /// contact-collection prompt.
+    /// </summary>
+    Usage,
 }

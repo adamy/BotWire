@@ -113,21 +113,23 @@ public class SummaryCompressorTests
 
         public string Name => "capturing";
 
-        public Task<string> ChatAsync(
+        public Task<LlmChatResult> ChatAsync(
             IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken cancellationToken = default)
         {
             Calls++;
             LastMessages = messages;
-            return Task.FromResult(response);
+            return Task.FromResult(new LlmChatResult(response));
         }
 
         public async IAsyncEnumerable<string> ChatStreamingAsync(
             IReadOnlyList<ChatMessage> messages,
             bool jsonObject = false,
+            Action<int>? onUsage = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             await Task.Yield();
             yield return response;
+            onUsage?.Invoke(0);
         }
     }
 }

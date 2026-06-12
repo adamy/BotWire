@@ -45,6 +45,13 @@ public sealed class BotWireOptions
     /// <summary>Rate-limit cap per IP per minute.</summary>
     public int MaxRequestsPerIpPerMinute { get; set; } = 20;
 
+    /// <summary>
+    /// Five-dimension rate limiting (design 008): concurrent sessions, per-minute delay,
+    /// per-session message cap, new-sessions-per-IP-per-hour, and a daily token budget.
+    /// Each dimension is independently configurable and disabled when set to <c>0</c>.
+    /// </summary>
+    public RateLimitOptions RateLimiting { get; set; } = new();
+
     /// <summary>Idle TTL for conversation sessions.</summary>
     public TimeSpan SessionTtl { get; set; } = TimeSpan.FromHours(2);
 

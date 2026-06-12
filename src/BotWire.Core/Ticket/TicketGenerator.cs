@@ -68,15 +68,17 @@ internal sealed class TicketGenerator
     /// <param name="triggerMessage">The user message that triggered the escalation.</param>
     /// <param name="contact">Optional user contact details; not passed to the LLM.</param>
     /// <param name="cancellationToken">Token to cancel the LLM call.</param>
-    public async Task<SupportTicket> GenerateAsync(
+    /// <returns>The generated ticket and the tokens billed for the summarisation call.</returns>
+    public async Task<(SupportTicket Ticket, int Tokens)> GenerateAsync(
         ConversationSession session,
         string triggerMessage,
         ContactInfo? contact,
         CancellationToken cancellationToken = default)
     {
         var messages = BuildMessages(session);
-        var raw = await _chat.ChatAsync(messages, jsonObject: false, cancellationToken);
-        var json = StripMarkdownFences(raw);
+        var completion = await _chat.ChatAsync(messages, jsonObject: false, cancellationToken);
+        var tokens = completion.TotalTokens;
+        var json = StripMarkdownFences(completion.Text);
 
         string summary, details;
         TicketPriority priority;
@@ -97,7 +99,7 @@ internal sealed class TicketGenerator
             priority = TicketPriority.Medium;
         }
 
-        return new SupportTicket(
+        var ticket = new SupportTicket(
             TicketId: TicketIdGenerator.Next(_ticketPrefix),
             UserMessage: triggerMessage,
             AiSummary: summary,
@@ -106,6 +108,8 @@ internal sealed class TicketGenerator
             Contact: contact,
             History: session.FullHistory.AsReadOnly(),
             CreatedAt: DateTimeOffset.UtcNow);
+
+        return (ticket, tokens);
     }
 
     private List<ChatMessage> BuildMessages(ConversationSession session)

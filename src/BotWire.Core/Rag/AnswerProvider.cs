@@ -83,10 +83,10 @@ public sealed class AnswerProvider : IAnswerProvider
         {
             if (session.EscalationTriggerMessage is null)
                 _logger.LogWarning("BotWire: EscalationPending is true but EscalationTriggerMessage is null; falling back to current message as ticket UserMessage.");
-            var ticket = await _ticketGenerator.GenerateAsync(
+            var (ticket, ticketTokens) = await _ticketGenerator.GenerateAsync(
                 session, session.EscalationTriggerMessage ?? message, contact, cancellationToken);
             await NotifyAsync(ticket, cancellationToken);
-            return new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId);
+            return new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId, TokensUsed: ticketTokens);
         }
 
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
@@ -95,19 +95,22 @@ public sealed class AnswerProvider : IAnswerProvider
         // Retry empty/invalid responses a few times before handing off to a human, since a single
         // garbled reply (bad JSON, or a whitespace-only message) should not surface as a blank answer.
         var attempts = Math.Max(1, _options.MaxAnswerAttempts);
+        var tokens = 0;
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
-            var raw = await _chat.ChatAsync(messages, jsonObject: true, cancellationToken);
+            var completion = await _chat.ChatAsync(messages, jsonObject: true, cancellationToken);
+            tokens += completion.TotalTokens;
+            var raw = completion.Text;
             var parsed = ParseAnswerJson(raw);
 
             if (parsed.Ok && parsed.OffTopic && _options.TopicGuardEnabled)
-                return new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: raw);
+                return new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: raw, TokensUsed: tokens);
 
             if (parsed.Ok && parsed.Action == "escalate")
-                return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage, RawResponse: raw);
+                return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage, RawResponse: raw, TokensUsed: tokens);
 
             if (parsed.Ok && !string.IsNullOrWhiteSpace(parsed.Message))
-                return new AnswerResult(AnswerStatus.Answered, parsed.Message, RawResponse: raw);
+                return new AnswerResult(AnswerStatus.Answered, parsed.Message, RawResponse: raw, TokensUsed: tokens);
 
             _logger.LogWarning(
                 "BotWire: empty or invalid answer response (attempt {Attempt}/{Max}): '{Raw}'",
@@ -116,7 +119,7 @@ public sealed class AnswerProvider : IAnswerProvider
 
         // Every attempt was empty or invalid — escalate to a human rather than show a blank answer.
         _logger.LogWarning("BotWire: {Max} answer attempts were all empty/invalid — escalating to a human.", attempts);
-        return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage);
+        return new AnswerResult(AnswerStatus.NeedHuman, _options.AutoEscalationMessage, TokensUsed: tokens);
     }
 
     /// <inheritdoc/>
@@ -130,10 +133,11 @@ public sealed class AnswerProvider : IAnswerProvider
         {
             if (session.EscalationTriggerMessage is null)
                 _logger.LogWarning("BotWire: EscalationPending is true but EscalationTriggerMessage is null; falling back to current message as ticket UserMessage.");
-            var ticket = await _ticketGenerator.GenerateAsync(
+            var (ticket, ticketTokens) = await _ticketGenerator.GenerateAsync(
                 session, session.EscalationTriggerMessage ?? message, contact, cancellationToken);
             await NotifyAsync(ticket, cancellationToken);
             var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
+            yield return BotEvent.Usage(ticketTokens);
             yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
             yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
             yield break;
@@ -142,6 +146,10 @@ public sealed class AnswerProvider : IAnswerProvider
         var systemPrompt = await GetSystemPromptAsync(cancellationToken);
         var messages = BuildMessages(systemPrompt, session, message);
 
+        // Running token total for the turn; captured by EmitEscalation below and surfaced via Usage
+        // events so escalation paths (which emit no Done) still report usage.
+        var tokens = 0;
+
         // Reused by both the live first attempt and the buffered retries below.
         async IAsyncEnumerable<BotEvent> EmitEscalation(bool announce)
         {
@@ -149,14 +157,19 @@ public sealed class AnswerProvider : IAnswerProvider
                 yield return BotEvent.Escalated();
             if (contact is not null)
             {
-                var ticket = await _ticketGenerator.GenerateAsync(session, message, contact, cancellationToken);
+                var (ticket, ticketTokens) = await _ticketGenerator.GenerateAsync(session, message, contact, cancellationToken);
                 await NotifyAsync(ticket, cancellationToken);
                 var confirmMsg = _options.TicketConfirmedMessage.Replace("{ticketId}", ticket.TicketId);
+                // Report the escalate-decision tokens plus the ticket-summarisation tokens.
+                yield return BotEvent.Usage(tokens + ticketTokens);
                 yield return BotEvent.TicketConfirmed(ticket.TicketId, confirmMsg);
                 yield return BotEvent.Done(new AnswerResult(AnswerStatus.TicketCreated, ticket.TicketId));
             }
             else
             {
+                // No contact yet: surface the escalate-decision tokens before the contact prompt,
+                // which has no Done event to carry them.
+                yield return BotEvent.Usage(tokens);
                 yield return BotEvent.CollectContact();
             }
         }
@@ -167,7 +180,7 @@ public sealed class AnswerProvider : IAnswerProvider
         var mode   = StreamMode.Pending;
         var emitted = false; // true once any non-whitespace message text has been streamed
 
-        await foreach (var delta in _chat.ChatStreamingAsync(messages, jsonObject: true, cancellationToken))
+        await foreach (var delta in _chat.ChatStreamingAsync(messages, jsonObject: true, onUsage: t => tokens += t, cancellationToken))
         {
             foreach (var output in reader.Feed(delta))
             {
@@ -220,12 +233,12 @@ public sealed class AnswerProvider : IAnswerProvider
         }
         if (mode == StreamMode.OffTopic)
         {
-            yield return BotEvent.Done(new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: reader.Raw));
+            yield return BotEvent.Done(new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: reader.Raw, TokensUsed: tokens));
             yield break;
         }
         if (mode == StreamMode.Answer && emitted)
         {
-            yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, answer.ToString().Trim(), RawResponse: reader.Raw));
+            yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, answer.ToString().Trim(), RawResponse: reader.Raw, TokensUsed: tokens));
             yield break;
         }
 
@@ -235,13 +248,15 @@ public sealed class AnswerProvider : IAnswerProvider
         var attempts = Math.Max(1, _options.MaxAnswerAttempts);
         for (var attempt = 2; attempt <= attempts; attempt++)
         {
-            var raw = await _chat.ChatAsync(messages, jsonObject: true, cancellationToken);
+            var completion = await _chat.ChatAsync(messages, jsonObject: true, cancellationToken);
+            tokens += completion.TotalTokens;
+            var raw = completion.Text;
             var parsed = ParseAnswerJson(raw);
 
             if (parsed.Ok && parsed.OffTopic && _options.TopicGuardEnabled)
             {
                 yield return BotEvent.Blocked(_options.OffTopicResponse);
-                yield return BotEvent.Done(new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: raw));
+                yield return BotEvent.Done(new AnswerResult(AnswerStatus.OffTopic, _options.OffTopicResponse, RawResponse: raw, TokensUsed: tokens));
                 yield break;
             }
             if (parsed.Ok && parsed.Action == "escalate")
@@ -252,7 +267,7 @@ public sealed class AnswerProvider : IAnswerProvider
             if (parsed.Ok && !string.IsNullOrWhiteSpace(parsed.Message))
             {
                 yield return BotEvent.TextChunk(parsed.Message);
-                yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, parsed.Message, RawResponse: raw));
+                yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, parsed.Message, RawResponse: raw, TokensUsed: tokens));
                 yield break;
             }
 

@@ -48,6 +48,9 @@ public sealed record BotEvent
     /// <summary>Error message. Populated when <see cref="Kind"/> is <see cref="BotEventKind.Error"/>.</summary>
     public string? ErrorMessage { get; init; }
 
+    /// <summary>Tokens billed for the turn. Populated when <see cref="Kind"/> is <see cref="BotEventKind.Usage"/>.</summary>
+    public int TokensUsed { get; init; }
+
     /// <summary>Creates a <see cref="BotEventKind.TextChunk"/> event.</summary>
     /// <param name="text">The partial text token.</param>
     public static BotEvent TextChunk(string text) =>
@@ -86,4 +89,9 @@ public sealed record BotEvent
     /// <param name="message">A description of the error.</param>
     public static BotEvent Error(string message) =>
         new() { Kind = BotEventKind.Error, ErrorMessage = message };
+
+    /// <summary>Creates a <see cref="BotEventKind.Usage"/> event reporting the turn's token total.</summary>
+    /// <param name="tokens">Total tokens billed for the turn.</param>
+    public static BotEvent Usage(int tokens) =>
+        new() { Kind = BotEventKind.Usage, TokensUsed = tokens };
 }

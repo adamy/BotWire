@@ -125,8 +125,10 @@ public static class BotWireEndpointExtensions
         var textBuffer        = new StringBuilder();
         var escalationStarted = false;
         var failedOpen        = false;
+        var tokensUsed        = 0;
         string? confirmedTicketId = null;
         string? rawResponse       = null;
+        string? offTopicMessage   = null;
 
         try
         {
@@ -152,14 +154,23 @@ public static class BotWireEndpointExtensions
                         break;
 
                     case BotEventKind.Blocked:
+                        // Off-topic turns stream a Blocked event instead of text; keep the message so
+                        // the commit can persist and audit it (with the raw JSON + tokens from Done).
+                        offTopicMessage = evt.Reason;
                         await WriteSseAsync(response,
                             $"{{\"type\":\"blocked\",\"reason\":{JsonSerializer.Serialize(evt.Reason, _sseJsonOpts)}}}");
                         break;
 
                     case BotEventKind.Done:
-                        failedOpen  = evt.Result?.FailedOpen ?? false;
-                        rawResponse = evt.Result?.RawResponse;
+                        failedOpen   = evt.Result?.FailedOpen ?? false;
+                        rawResponse  = evt.Result?.RawResponse;
+                        tokensUsed  += evt.Result?.TokensUsed ?? 0;
                         await WriteSseAsync(response, "[DONE]");
+                        break;
+
+                    case BotEventKind.Usage:
+                        // Internal token accounting; not surfaced to the client.
+                        tokensUsed += evt.TokensUsed;
                         break;
 
                     case BotEventKind.Escalated:
@@ -182,7 +193,7 @@ public static class BotWireEndpointExtensions
 
         await service.CommitStreamAsync(
             prep, textBuffer.ToString(), escalationStarted, confirmedTicketId, failedOpen,
-            rawResponse, context.RequestAborted);
+            rawResponse, tokensUsed, offTopicMessage, context.RequestAborted);
     }
 
     // ── GET /botwire/widget.js ──────────────────────────────────────────────────

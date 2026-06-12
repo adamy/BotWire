@@ -19,6 +19,7 @@ using BotWire.Core.Abstractions;
 using BotWire.Core.Audit;
 using BotWire.Core.Conversation;
 using BotWire.Core.Exceptions;
+using BotWire.Core.Guard;
 using BotWire.Core.Llm;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -99,6 +100,23 @@ public static class BotWireServiceCollectionExtensions
                 o.Enabled            = opts.PromptInjection.Enabled;
                 o.AdditionalPatterns = opts.PromptInjection.AdditionalPatterns;
             });
+
+        // ── Five-dimension rate limiter (design 008) ────────────────────────────
+        services.AddOptions<RateLimitOptions>()
+            .Configure<IOptions<BotWireOptions>>((rl, bw) =>
+            {
+                var src = bw.Value.RateLimiting;
+                rl.MaxConcurrentSessions    = src.MaxConcurrentSessions;
+                rl.MaxMessagesPerMinute     = src.MaxMessagesPerMinute;
+                rl.MaxMessagesPerSession    = src.MaxMessagesPerSession;
+                rl.MaxSessionsPerIpPerHour  = src.MaxSessionsPerIpPerHour;
+                rl.DailyTokenBudget         = src.DailyTokenBudget;
+                rl.SessionMessageCapMessage = src.SessionMessageCapMessage;
+                rl.IpSessionCapMessage      = src.IpSessionCapMessage;
+                rl.TokenBudgetMessage       = src.TokenBudgetMessage;
+            })
+            .ValidateDataAnnotations();
+        services.AddSingleton<RateLimiter>();
 
         // ── Conversation store ──────────────────────────────────────────────────
         services.AddInMemoryConversationStore(o => o.SessionTtl = opts.SessionTtl);
