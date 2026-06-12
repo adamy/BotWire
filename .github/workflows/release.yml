@@ -102,7 +102,11 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Publish to npm
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted Publishing (OIDC) needs a newer npm than Node 22 ships with.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      # No token: authenticates via OIDC against the trusted publisher configured
+      # for botwire-js on npmjs.com. Provenance is attached automatically.
+      - name: Publish to npm (Trusted Publishing, OIDC)
+        run: npm publish --access public
