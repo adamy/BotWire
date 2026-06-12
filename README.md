@@ -84,10 +84,39 @@ That's it — the bot answers from `docs/faq.md` and raises tickets when it can'
 | `MaxAnswerAttempts` | `3` | How many times to retry an empty/invalid model reply within one turn before handing off to a human. |
 | `OffTopicResponse` | *(built-in)* | Reply shown when the off-topic guard classifies a message outside your support scope. |
 | `MaxMessageLength` | `2000` | Max user message length in characters. |
-| `MaxRequestsPerIpPerMinute` | `20` | IP rate-limit cap. |
+| `MaxRequestsPerIpPerMinute` | `20` | Per-IP request cap (first-line flood guard, separate from `RateLimiting` below). |
+| `RateLimiting` | *(see below)* | Five-dimension rate limiting — concurrency, per-minute, per-session, per-IP/hour, and a daily token budget. |
 | `SessionTtl` | `2 hours` | Idle session lifetime. |
 | `Email` | `null` | SMTP settings for ticket notification emails. `null` disables email. |
 | `TicketLanguage` | `"English"` | Language the AI writes ticket summary/details in. Customer-facing replies always match the customer's own language. |
+
+### Rate limiting
+
+`RateLimiting` controls five independent limits that protect your token bill and keep the service responsive. Each is disabled when set to `0`, and each over-limit behaviour is chosen to favour user experience (delay or degrade) over hard errors where possible:
+
+```csharp
+builder.Services.AddBotWire(opts =>
+{
+    opts.RateLimiting = new RateLimitOptions
+    {
+        MaxConcurrentSessions   = 100,      // global in-flight answers; over the cap requests QUEUE (never rejected)
+        MaxMessagesPerMinute    = 5,        // per session; over the cap the turn is DELAYED, not errored
+        MaxMessagesPerSession   = 50,       // over the cap the user is asked to start a new conversation
+        MaxSessionsPerIpPerHour = 10,       // over the cap NEW sessions from that IP are rejected (HTTP 429)
+        DailyTokenBudget        = 500_000,  // summed from real provider usage; over budget returns a degraded reply
+    };
+});
+```
+
+| Dimension | Over-limit behaviour |
+|---|---|
+| `MaxConcurrentSessions` | Queue and wait for a slot. |
+| `MaxMessagesPerMinute` | Delay the turn (no error). |
+| `MaxMessagesPerSession` | Prompt the user to start a new conversation. |
+| `MaxSessionsPerIpPerHour` | Reject new session creation. |
+| `DailyTokenBudget` | Degraded response suggesting email contact. |
+
+The daily token total is summed from the provider's reported usage (`TotalTokenCount`, with a character-based estimate when the provider omits it). Counters are **in-memory and per-process** — they reset on restart and are not shared across instances; durable, cross-instance budgeting (Redis) is planned for a later release. Each over-limit hit is recorded in the audit log as a `rate_limited` event naming the dimension.
 
 ## Customization
 
@@ -171,8 +200,13 @@ Each line is a self-contained JSON object, e.g. in `logs/audit/20260611/u-123.nd
 
 ```jsonl
 {"ts":"2026-06-11T10:00:00+00:00","event":"message","sessionId":"u-123","role":"user","content":"refund?"}
-{"ts":"2026-06-11T10:00:01+00:00","event":"escalated","sessionId":"u-123","reason":"NEED_HUMAN","ticketId":"TKT-20260611-0042"}
+{"ts":"2026-06-11T10:00:01+00:00","event":"message","sessionId":"u-123","role":"assistant","content":"...","tokens":2577}
+{"ts":"2026-06-11T10:00:30+00:00","event":"escalated","sessionId":"u-123","reason":"NEED_HUMAN","ticketId":"TKT-20260611-0042","tokens":274}
 ```
+
+Assistant and escalation events carry a `tokens` field with the provider-reported usage for that turn
+(the same figure that feeds `RateLimiting.DailyTokenBudget`). Rate-limit hits are logged as
+`rate_limited` events naming the dimension that tripped.
 
 Files are opened for shared reading (`tail -f`-friendly) and concurrent writes are serialised.
 BotWire only writes; querying is up to you. To send events elsewhere (database, queue), register
