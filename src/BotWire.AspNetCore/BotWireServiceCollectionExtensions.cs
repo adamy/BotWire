@@ -16,9 +16,13 @@
 
 using BotWire.AspNetCore;
 using BotWire.Core.Abstractions;
+using BotWire.Core.Audit;
+using BotWire.Core.Conversation;
 using BotWire.Core.Exceptions;
+using BotWire.Core.Guard;
 using BotWire.Core.Llm;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -63,6 +67,7 @@ public static class BotWireServiceCollectionExtensions
                 llmOpts.ChatModel      = bw.ChatProvider.Model;
                 llmOpts.EmbeddingModel = bw.EmbeddingProvider?.Model ?? "text-embedding-3-small";
                 llmOpts.BaseUrl        = bw.ChatProvider.BaseUrl;
+                llmOpts.Temperature    = bw.ChatProvider.Temperature;
             });
 
         services.AddSingleton<OpenAILlmClient>();
@@ -96,8 +101,31 @@ public static class BotWireServiceCollectionExtensions
                 o.AdditionalPatterns = opts.PromptInjection.AdditionalPatterns;
             });
 
+        // ── Five-dimension rate limiter (design 008) ────────────────────────────
+        services.AddOptions<RateLimitOptions>()
+            .Configure<IOptions<BotWireOptions>>((rl, bw) =>
+            {
+                var src = bw.Value.RateLimiting;
+                rl.MaxConcurrentSessions    = src.MaxConcurrentSessions;
+                rl.MaxMessagesPerMinute     = src.MaxMessagesPerMinute;
+                rl.MaxMessagesPerSession    = src.MaxMessagesPerSession;
+                rl.MaxSessionsPerIpPerHour  = src.MaxSessionsPerIpPerHour;
+                rl.DailyTokenBudget         = src.DailyTokenBudget;
+                rl.SessionMessageCapMessage = src.SessionMessageCapMessage;
+                rl.IpSessionCapMessage      = src.IpSessionCapMessage;
+                rl.TokenBudgetMessage       = src.TokenBudgetMessage;
+            })
+            .ValidateDataAnnotations();
+        services.AddSingleton<RateLimiter>();
+
         // ── Conversation store ──────────────────────────────────────────────────
         services.AddInMemoryConversationStore(o => o.SessionTtl = opts.SessionTtl);
+
+        // Summary compression for the send-history. TryAdd lets a host swap in its own.
+        services.TryAddSingleton<ISummaryCompressor, SummaryCompressor>();
+
+        // Audit log: no-op by default. AddJsonAuditLog(...) or a custom registration replaces it.
+        services.TryAddSingleton<IAuditLogger>(NullAuditLogger.Instance);
 
         // ── Answer provider (RAG, Mode A) ───────────────────────────────────────
         services.AddBotWireAnswerProvider(o =>
@@ -107,6 +135,9 @@ public static class BotWireServiceCollectionExtensions
             o.TicketLanguage          = opts.TicketLanguage;
             o.TicketConfirmedMessage  = opts.TicketConfirmedMessage;
             o.OnTicketCreated         = opts.OnTicketCreated;
+            o.OffTopicResponse        = opts.OffTopicResponse;
+            o.TopicGuardEnabled       = !string.IsNullOrWhiteSpace(opts.TopicDescription);
+            o.MaxAnswerAttempts       = opts.MaxAnswerAttempts;
         });
 
         // ── Session tokens ──────────────────────────────────────────────────────

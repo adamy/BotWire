@@ -16,8 +16,10 @@
 
 using System.ClientModel;
 using System.Runtime.CompilerServices;
+using System.Text;
 using BotWire.Core.Abstractions;
 using BotWire.Core.Enums;
+using BotWire.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenAI;
@@ -38,6 +40,7 @@ public sealed class OpenAILlmClient : ILlmClient
     private readonly ILogger<OpenAILlmClient> _logger;
     private readonly bool _hasCustomBaseUrl;
     private readonly string _baseUrl;
+    private readonly float? _temperature;
 
     /// <summary>Initializes a new instance using the provided options.</summary>
     /// <param name="options">Bound options containing API key and model names.</param>
@@ -50,6 +53,7 @@ public sealed class OpenAILlmClient : ILlmClient
 
         _hasCustomBaseUrl = !string.IsNullOrWhiteSpace(opts.BaseUrl);
         _baseUrl = _hasCustomBaseUrl ? opts.BaseUrl! : "https://api.openai.com";
+        _temperature = opts.Temperature;
 
         if (_hasCustomBaseUrl)
         {
@@ -69,31 +73,64 @@ public sealed class OpenAILlmClient : ILlmClient
     public string Name => "openai";
 
     /// <inheritdoc/>
-    public async Task<string> ChatAsync(
+    public async Task<LlmChatResult> ChatAsync(
         IReadOnlyList<BotWireChatMessage> messages,
+        bool jsonObject = false,
         CancellationToken cancellationToken = default)
     {
         var oaiMessages = MapMessages(messages);
-        ChatCompletion completion = await _chatClient.CompleteChatAsync(oaiMessages, cancellationToken: cancellationToken);
-        return completion.Content.Count > 0 ? completion.Content[0].Text : string.Empty;
+        var options = BuildOptions(jsonObject);
+        ChatCompletion completion = await _chatClient.CompleteChatAsync(oaiMessages, options, cancellationToken);
+        var text = completion.Content.Count > 0 ? completion.Content[0].Text : string.Empty;
+        var tokens = completion.Usage?.TotalTokenCount ?? EstimateTokens(messages, text);
+        return new LlmChatResult(text, tokens);
     }
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<string> ChatStreamingAsync(
         IReadOnlyList<BotWireChatMessage> messages,
+        bool jsonObject = false,
+        Action<int>? onUsage = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var oaiMessages = MapMessages(messages);
-        var stream = _chatClient.CompleteChatStreamingAsync(oaiMessages, cancellationToken: cancellationToken);
+        var options = BuildOptions(jsonObject);
+        var stream = _chatClient.CompleteChatStreamingAsync(oaiMessages, options, cancellationToken);
 
+        var output = new StringBuilder();
+        int? reportedTokens = null;
         await foreach (StreamingChatCompletionUpdate update in stream)
         {
+            // Providers that opt into streaming usage populate Usage on the terminal update.
+            if (update.Usage is { } usage)
+                reportedTokens = usage.TotalTokenCount;
+
             foreach (var part in update.ContentUpdate)
             {
                 if (!string.IsNullOrEmpty(part.Text))
+                {
+                    output.Append(part.Text);
                     yield return part.Text;
+                }
             }
         }
+
+        // Most OpenAI-compatible streaming endpoints omit usage, so fall back to an estimate. The
+        // callback contract is identical either way, so real counts can be wired in later with no
+        // change to callers.
+        onUsage?.Invoke(reportedTokens ?? EstimateTokens(messages, output.ToString()));
+    }
+
+    /// <summary>
+    /// Rough token estimate (~4 chars/token) over the prompt and completion, used when the provider
+    /// does not report usage.
+    /// </summary>
+    private static int EstimateTokens(IReadOnlyList<BotWireChatMessage> messages, string completion)
+    {
+        var chars = completion.Length;
+        for (var i = 0; i < messages.Count; i++)
+            chars += messages[i].Content.Length;
+        return chars / 4;
     }
 
     /// <inheritdoc/>
@@ -107,6 +144,19 @@ public sealed class OpenAILlmClient : ILlmClient
 
         OpenAIEmbedding embedding = await _embeddingClient.GenerateEmbeddingAsync(text, cancellationToken: cancellationToken);
         return embedding.ToFloats().ToArray();
+    }
+
+    private ChatCompletionOptions? BuildOptions(bool jsonObject)
+    {
+        if (!jsonObject && _temperature is null)
+            return null;
+
+        var options = new ChatCompletionOptions();
+        if (jsonObject)
+            options.ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat();
+        if (_temperature is { } t)
+            options.Temperature = t;
+        return options;
     }
 
     private static OpenAI.Chat.ChatMessage ToOpenAiMessage(BotWireChatMessage msg) =>

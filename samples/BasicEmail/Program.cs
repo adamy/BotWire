@@ -14,8 +14,12 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+using System.Text;
 using BotWire.AspNetCore;
 using BotWire.Channels.Email;
+
+// Render non-ASCII (e.g. 中文) log output correctly instead of "??" in the console.
+Console.OutputEncoding = Encoding.UTF8;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -42,7 +46,8 @@ builder.Services.AddBotWire(opts =>
         FromAddress = "support@acme.example",
         ToAddress   = "support-team@acme.example",
     };
-});
+})
+.AddJsonAuditLog(Path.Combine(AppContext.BaseDirectory, "logs", "audit"));
 
 var app = builder.Build();
 app.UseDefaultFiles();

@@ -25,12 +25,15 @@ internal sealed class FakeAnswerProvider : IAnswerProvider
 {
     public AnswerResult Result { get; set; } = new(AnswerStatus.Answered, "Test answer");
 
+    /// <summary>When set, <see cref="AnswerAsync"/> throws this instead of returning a result.</summary>
+    public Exception? ThrowError { get; set; }
+
     public Task<AnswerResult> AnswerAsync(
         string message,
         ConversationSession session,
         ContactInfo? contact = null,
         CancellationToken cancellationToken = default)
-        => Task.FromResult(Result);
+        => ThrowError is not null ? Task.FromException<AnswerResult>(ThrowError) : Task.FromResult(Result);
 
     public async IAsyncEnumerable<BotEvent> StreamAsync(
         string message,

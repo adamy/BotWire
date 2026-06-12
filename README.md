@@ -77,9 +77,12 @@ That's it — the bot answers from `docs/faq.md` and raises tickets when it can'
 
 | Property | Default | Description |
 |---|---|---|
-| `TopicDescription` | *(required)* | Short phrase describing your support scope, injected into the system prompt. |
+| `TopicDescription` | *(required)* | Short phrase describing your support scope, injected into the system prompt. Also enables the off-topic guard. |
 | `Documents` | `[]` | Paths to Markdown knowledge-base files. |
-| `ChatProvider` | *(required)* | LLM provider — `ApiKey`, `Model`, optional `BaseUrl` for OpenAI-compatible APIs (e.g. DeepSeek). |
+| `ChatProvider` | *(required)* | LLM provider — `ApiKey`, `Model`, optional `BaseUrl` for OpenAI-compatible APIs (e.g. DeepSeek), optional `Temperature`. |
+| `ChatProvider.Temperature` | `0.2` | Sampling temperature. Low by default for consistent, grounded answers. Set `null` to omit it and use the provider's own default. |
+| `MaxAnswerAttempts` | `3` | How many times to retry an empty/invalid model reply within one turn before handing off to a human. |
+| `OffTopicResponse` | *(built-in)* | Reply shown when the off-topic guard classifies a message outside your support scope. |
 | `MaxMessageLength` | `2000` | Max user message length in characters. |
 | `MaxRequestsPerIpPerMinute` | `20` | IP rate-limit cap. |
 | `SessionTtl` | `2 hours` | Idle session lifetime. |
@@ -97,7 +100,27 @@ builder.Services.AddSingleton<ISystemPromptBuilder, MyPromptBuilder>();
 builder.Services.AddBotWire(opts => { ... });
 ```
 
-`ISystemPromptBuilder.Build(documents)` receives the loaded knowledge-base document contents and must return the complete system prompt. Your implementation **must** preserve the control-word contract: the model's first line must be either `ANSWER` or `ESCALATE` on its own line, otherwise escalation and ticket creation stop working.
+`ISystemPromptBuilder.Build(documents)` receives the loaded knowledge-base document contents and must return the complete system prompt. Your implementation **must** preserve the response contract described below, otherwise escalation, off-topic handling, and ticket creation stop working.
+
+### AI response protocol
+
+The model is required to reply with a single JSON object and nothing else:
+
+```json
+{ "offtopic": false, "action": "answer", "message": "..." }
+```
+
+- **`action`** — `"answer"` (the `message` is shown to the customer) or `"escalate"` (BotWire runs its standard contact-collection flow and ignores `message`).
+- **`offtopic`** — present only when `TopicDescription` is set. When `true`, BotWire shows `OffTopicResponse` instead of the model's text.
+- **`message`** — the customer-facing reply, in the customer's own language.
+
+This is requested via the provider's `response_format: json_object` mode. Field order matters for streaming: BotWire's incremental reader waits until `offtopic`/`action` have arrived before it starts streaming `message` token by token, so the customer never briefly sees an escalation that then disappears. If the model reorders the fields and emits `message` first, the reader streams it as a plain answer.
+
+**Retry and hand-off.** If a reply is not valid JSON, or carries an empty/whitespace-only `message`, BotWire retries up to `MaxAnswerAttempts` times (default 3) within the same turn. Nothing is shown to the customer between attempts. If every attempt is unusable, BotWire escalates to a human rather than show a blank answer.
+
+**Conversation history.** BotWire keeps each assistant turn in two forms: the readable text for ticket generation, and the **raw JSON envelope** in the history it sends back to the model. Replaying the envelope (rather than bare text) keeps the model anchored to the JSON format across long conversations — feeding it plain-text history teaches it to drop the format and reply with bare text or whitespace on later turns. A custom `ISystemPromptBuilder` does not need to handle this; it is internal to the answer pipeline.
+
+A low `ChatProvider.Temperature` (default `0.2`) further stabilises format adherence and keeps grounded answers consistent.
 
 ### Ticket language
 
@@ -131,6 +154,81 @@ Register your own `IEmailTemplateFormatter` to control how tickets are formatted
 ```csharp
 builder.Services.AddSingleton<IEmailTemplateFormatter, MyEmailFormatter>();
 ```
+
+### Audit log
+
+BotWire can emit business/compliance events (messages, guard blocks, escalations, rate-limit
+hits, errors) to a write-only audit sink — separate from application logging (`ILogger<T>`).
+The default is a no-op. Write newline-delimited JSON (NDJSON) under a root folder — one file per
+session, bucketed by UTC date (`{root}/{yyyyMMdd}/{sessionId}.ndjson`):
+
+```csharp
+builder.Services.AddBotWire(opts => { /* ... */ })
+                .AddJsonAuditLog("logs/audit");
+```
+
+Each line is a self-contained JSON object, e.g. in `logs/audit/20260611/u-123.ndjson`:
+
+```jsonl
+{"ts":"2026-06-11T10:00:00+00:00","event":"message","sessionId":"u-123","role":"user","content":"refund?"}
+{"ts":"2026-06-11T10:00:01+00:00","event":"escalated","sessionId":"u-123","reason":"NEED_HUMAN","ticketId":"TKT-20260611-0042"}
+```
+
+Files are opened for shared reading (`tail -f`-friendly) and concurrent writes are serialised.
+BotWire only writes; querying is up to you. To send events elsewhere (database, queue), register
+your own `IAuditLogger`:
+
+```csharp
+builder.Services.AddSingleton<IAuditLogger, MyAuditLogger>();
+```
+
+## Deploying behind a reverse proxy or CDN
+
+If your site sits behind a reverse proxy or CDN (Cloudflare, nginx, IIS ARR, …), the
+connection BotWire sees comes from the proxy, not the visitor. Two things need attention:
+
+### Restore the real client IP
+
+BotWire's rate limiter keys on the client IP. Behind a proxy every visitor appears to
+come from a handful of proxy IPs, so legitimate traffic can trip the limiter (HTTP 429).
+Enable ASP.NET Core's forwarded-headers middleware **before** `MapBotWire()`:
+
+```csharp
+using Microsoft.AspNetCore.HttpOverrides;
+
+builder.Services.Configure<ForwardedHeadersOptions>(opts =>
+{
+    opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // Trust your proxy. For Cloudflare, add its published IP ranges to KnownNetworks,
+    // or clear the lists if an upstream firewall already guarantees the source.
+    opts.KnownNetworks.Clear();
+    opts.KnownProxies.Clear();
+});
+
+app.UseForwardedHeaders();
+```
+
+Cloudflare also sends the original visitor IP in the `CF-Connecting-IP` header; if you
+prefer that over `X-Forwarded-For`, copy it into `X-Forwarded-For` at your origin server
+or use Cloudflare's [authenticated origin pulls + restore-IP guidance](https://developers.cloudflare.com/support/troubleshooting/restoring-visitor-ips/restoring-original-visitor-ips/).
+
+### Cloudflare-specific settings
+
+- **Bypass cache for `/support/*`** — chat responses are per-visitor and streamed; add a
+  cache rule that bypasses cache for `/support/*` so Cloudflare never caches or buffers them.
+- **Disable Rocket Loader** for pages embedding the widget — it defers script execution
+  and can break the widget's custom element registration.
+- **Use Full (strict) SSL** — Flexible SSL terminates TLS at the edge and connects to your
+  origin over HTTP, which can cause redirect loops and mixed-content issues with SSE.
+
+### Session tokens and process restarts
+
+The default session store (`AddInMemoryConversationStore`) lives in process memory. On
+shared hosting, app-pool recycles or redeploys clear it, so browsers may hold a stale
+session token. The widget handles this automatically: a rejected token
+(`status: "InvalidSession"`) makes it create a fresh session and resend the message once,
+invisibly to the user. Custom clients should do the same — see the
+`status` field on the 400 response.
 
 ## Running tests
 

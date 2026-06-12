@@ -64,19 +64,34 @@ public sealed class AnswerProviderOptions
         "✓ Support ticket {ticketId} created — we'll be in touch soon.";
 
     /// <summary>
-    /// Message streamed to the customer when the bot automatically escalates after
-    /// <c>FailOpenEscalateThreshold</c> consecutive control-word failures. Set to an empty
-    /// string to show no message before the contact form. Defaults to
-    /// <c>"Let me connect you with our support team."</c>.
+    /// Message used when the bot escalates to a human (the model returned <c>action: "escalate"</c>,
+    /// or every answer attempt was empty/invalid). Set to an empty string to show no message before
+    /// the contact form. Defaults to <c>"Let me connect you with our support team."</c>.
     /// </summary>
     public string AutoEscalationMessage { get; set; } =
         "Let me connect you with our support team.";
 
     /// <summary>
-    /// Number of consecutive fail-open turns (no control word) that triggers automatic
-    /// escalation triage. Defaults to <c>3</c>.
+    /// Maximum number of LLM attempts for a single turn when the response is empty or invalid
+    /// (malformed JSON, or a blank message). After this many empty/invalid responses the turn is
+    /// escalated to a human instead of showing a blank answer. Defaults to <c>3</c>.
     /// </summary>
-    public int FailOpenEscalateThreshold { get; set; } = 3;
+    public int MaxAnswerAttempts { get; set; } = 3;
+
+    /// <summary>
+    /// When true, the answer model is asked to classify each message as on- or off-topic and
+    /// off-topic messages are answered with <see cref="OffTopicResponse"/> instead of the knowledge
+    /// base. Enabled automatically when a topic description is configured.
+    /// </summary>
+    public bool TopicGuardEnabled { get; set; }
+
+    /// <summary>
+    /// Message shown to the customer when their message is classified off-topic (only used when
+    /// <see cref="TopicGuardEnabled"/> is true).
+    /// </summary>
+    public string OffTopicResponse { get; set; } =
+        "I'm sorry, I can only help with questions related to our support topics. " +
+        "Is there something along those lines I can help you with?";
 
     /// <summary>
     /// Optional async callback invoked after a support ticket is created and all

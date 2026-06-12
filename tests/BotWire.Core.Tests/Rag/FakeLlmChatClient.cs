@@ -34,11 +34,20 @@ internal sealed class FakeLlmChatClient : ILlmChatClient
 
     public string Name => "fake";
 
-    public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default) =>
-        Task.FromResult(_full);
+    /// <summary>Messages from the most recent <see cref="ChatAsync"/> call, for assertions.</summary>
+    public IReadOnlyList<ChatMessage>? LastMessages { get; private set; }
+
+    public Task<LlmChatResult> ChatAsync(
+        IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken cancellationToken = default)
+    {
+        LastMessages = messages;
+        return Task.FromResult(new LlmChatResult(_full));
+    }
 
     public async IAsyncEnumerable<string> ChatStreamingAsync(
         IReadOnlyList<ChatMessage> messages,
+        bool jsonObject = false,
+        Action<int>? onUsage = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         foreach (var delta in _deltas)
@@ -47,6 +56,8 @@ internal sealed class FakeLlmChatClient : ILlmChatClient
             yield return delta;
             await Task.Yield();
         }
+
+        onUsage?.Invoke(0);
     }
 }
 

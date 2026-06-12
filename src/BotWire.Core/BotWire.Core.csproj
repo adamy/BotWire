@@ -5,17 +5,17 @@
     <Authors>Object IT Limited</Authors>
     <Company>Object IT Limited</Company>
     <Description>Core engine for BotWire — a low-cost, self-hosted AI customer-support bot for .NET. RAG answers grounded in your own docs, automatic escalation to human tickets, PII + prompt-injection guards. No ASP.NET dependency. Commercial licenses available for proprietary use.</Description>
-    <PackageTags>botwire;chatbot;customer-support;bot</PackageTags>
+    <PackageTags>botwire;ai;chatbot;customer-support;rag;openai;llm;gpt;deepseek;self-hosted;support-bot;helpdesk</PackageTags>
     <PackageProjectUrl>https://github.com/adamy/BotWire</PackageProjectUrl>
     <RepositoryUrl>https://github.com/adamy/BotWire</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>NUGET.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\NUGET.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

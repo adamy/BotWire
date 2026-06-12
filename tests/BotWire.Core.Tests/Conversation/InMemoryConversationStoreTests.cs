@@ -40,7 +40,7 @@ public class InMemoryConversationStoreTests
     }
 
     private static ConversationSession Session(params ChatMessage[] messages) =>
-        new([.. messages], DateTimeOffset.UtcNow);
+        new([.. messages], [.. messages], DateTimeOffset.UtcNow);
 
     private static ChatMessage User(string text) => new(ChatRole.User, text);
 
@@ -64,15 +64,15 @@ public class InMemoryConversationStoreTests
         var loaded = await store.GetAsync("t1");
 
         Assert.NotNull(loaded);
-        Assert.Single(loaded!.History);
-        Assert.Equal("hello", loaded.History[0].Content);
+        Assert.Single(loaded!.SendHistory);
+        Assert.Equal("hello", loaded.SendHistory[0].Content);
     }
 
     [Fact]
     public async Task SaveAsync_UpdatesLastActivity()
     {
         using var store = CreateStore();
-        var stale = new ConversationSession([User("hi")], DateTimeOffset.UtcNow.AddDays(-1));
+        var stale = new ConversationSession([User("hi")], [User("hi")], DateTimeOffset.UtcNow.AddDays(-1));
         var before = DateTimeOffset.UtcNow;
 
         await store.SaveAsync("t1", stale);
@@ -118,12 +118,30 @@ public class InMemoryConversationStoreTests
         var loaded = await store.GetAsync("t1");
 
         Assert.NotNull(loaded);
-        Assert.Equal(3, loaded!.History.Count);
+        Assert.Equal(3, loaded!.SendHistory.Count);
         // System message preserved at the front, oldest user messages (m1, m2) dropped.
-        Assert.Equal(ChatRole.System, loaded.History[0].Role);
-        Assert.Equal("rules", loaded.History[0].Content);
-        Assert.Equal("m3", loaded.History[1].Content);
-        Assert.Equal("m4", loaded.History[2].Content);
+        Assert.Equal(ChatRole.System, loaded.SendHistory[0].Role);
+        Assert.Equal("rules", loaded.SendHistory[0].Content);
+        Assert.Equal("m3", loaded.SendHistory[1].Content);
+        Assert.Equal("m4", loaded.SendHistory[2].Content);
+    }
+
+    [Fact]
+    public async Task SaveAsync_NeverTrimsFullHistory()
+    {
+        using var store = CreateStore(maxHistory: 3);
+        // FullHistory must survive intact for ticket generation even when SendHistory is capped.
+        var session = new ConversationSession(
+            FullHistory: [User("m1"), User("m2"), User("m3"), User("m4"), User("m5")],
+            SendHistory: [User("m1"), User("m2"), User("m3"), User("m4"), User("m5")],
+            LastActivity: DateTimeOffset.UtcNow);
+
+        await store.SaveAsync("t1", session);
+        var loaded = await store.GetAsync("t1");
+
+        Assert.NotNull(loaded);
+        Assert.Equal(5, loaded!.FullHistory.Count);
+        Assert.Equal(3, loaded.SendHistory.Count);
     }
 
     [Fact]

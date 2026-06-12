@@ -18,6 +18,8 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using BotWire.AspNetCore;
+using BotWire.Core.Abstractions;
+using BotWire.Core.Audit;
 using BotWire.Core.Enums;
 using BotWire.Core.Models;
 using Microsoft.AspNetCore.Http;
@@ -34,6 +36,13 @@ public static class BotWireEndpointExtensions
     private static readonly JsonSerializerOptions _healthJsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
+    // Relaxed encoder so non-ASCII text in the SSE stream (e.g. 中文 replies) goes over the wire as
+    // readable UTF-8 instead of \uXXXX escapes. Browsers parse both, but raw/console views stay legible.
+    private static readonly JsonSerializerOptions _sseJsonOpts = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     /// <summary>
@@ -92,7 +101,8 @@ public static class BotWireEndpointExtensions
     private static async Task HandleChatStreamAsync(
         ChatRequest req,
         HttpContext context,
-        BotWireChatService service)
+        BotWireChatService service,
+        IAuditLogger audit)
     {
         var ip       = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var response = context.Response;
@@ -115,7 +125,10 @@ public static class BotWireEndpointExtensions
         var textBuffer        = new StringBuilder();
         var escalationStarted = false;
         var failedOpen        = false;
+        var tokensUsed        = 0;
         string? confirmedTicketId = null;
+        string? rawResponse       = null;
+        string? offTopicMessage   = null;
 
         try
         {
@@ -126,7 +139,7 @@ public static class BotWireEndpointExtensions
                     case BotEventKind.TextChunk:
                         textBuffer.Append(evt.Text);
                         await WriteSseAsync(response,
-                            $"{{\"type\":\"token\",\"value\":{JsonSerializer.Serialize(evt.Text)}}}");
+                            $"{{\"type\":\"token\",\"value\":{JsonSerializer.Serialize(evt.Text, _sseJsonOpts)}}}");
                         break;
 
                     case BotEventKind.CollectContact:
@@ -137,17 +150,27 @@ public static class BotWireEndpointExtensions
                     case BotEventKind.TicketConfirmed:
                         confirmedTicketId = evt.TicketId;
                         await WriteSseAsync(response,
-                            $"{{\"type\":\"escalated\",\"ticketId\":{JsonSerializer.Serialize(evt.TicketId)},\"message\":{JsonSerializer.Serialize(evt.ConfirmationMessage)}}}");
+                            $"{{\"type\":\"escalated\",\"ticketId\":{JsonSerializer.Serialize(evt.TicketId, _sseJsonOpts)},\"message\":{JsonSerializer.Serialize(evt.ConfirmationMessage, _sseJsonOpts)}}}");
                         break;
 
                     case BotEventKind.Blocked:
+                        // Off-topic turns stream a Blocked event instead of text; keep the message so
+                        // the commit can persist and audit it (with the raw JSON + tokens from Done).
+                        offTopicMessage = evt.Reason;
                         await WriteSseAsync(response,
-                            $"{{\"type\":\"blocked\",\"reason\":{JsonSerializer.Serialize(evt.Reason)}}}");
+                            $"{{\"type\":\"blocked\",\"reason\":{JsonSerializer.Serialize(evt.Reason, _sseJsonOpts)}}}");
                         break;
 
                     case BotEventKind.Done:
-                        failedOpen = evt.Result?.FailedOpen ?? false;
+                        failedOpen   = evt.Result?.FailedOpen ?? false;
+                        rawResponse  = evt.Result?.RawResponse;
+                        tokensUsed  += evt.Result?.TokensUsed ?? 0;
                         await WriteSseAsync(response, "[DONE]");
+                        break;
+
+                    case BotEventKind.Usage:
+                        // Internal token accounting; not surfaced to the client.
+                        tokensUsed += evt.TokensUsed;
                         break;
 
                     case BotEventKind.Escalated:
@@ -161,9 +184,16 @@ public static class BotWireEndpointExtensions
             // Client disconnected — skip CommitStreamAsync to avoid storing a partial turn
             return;
         }
+        catch (Exception ex)
+        {
+            // Record the failure for the audit trail, then let it propagate (ASP.NET aborts the stream).
+            await audit.LogAsync(AuditEvents.Error(prep.Token ?? "", ex.Message), CancellationToken.None);
+            throw;
+        }
 
         await service.CommitStreamAsync(
-            prep, textBuffer.ToString(), escalationStarted, confirmedTicketId, failedOpen, context.RequestAborted);
+            prep, textBuffer.ToString(), escalationStarted, confirmedTicketId, failedOpen,
+            rawResponse, tokensUsed, offTopicMessage, context.RequestAborted);
     }
 
     // ── GET /botwire/widget.js ──────────────────────────────────────────────────

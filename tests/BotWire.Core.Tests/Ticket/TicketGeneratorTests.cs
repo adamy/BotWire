@@ -27,7 +27,7 @@ namespace BotWire.Core.Tests.Ticket;
 
 public class TicketGeneratorTests
 {
-    private static ConversationSession EmptySession() => new([], DateTimeOffset.UtcNow);
+    private static ConversationSession EmptySession() => new([], [], DateTimeOffset.UtcNow);
 
     private static TicketGenerator CreateGenerator(ILlmChatClient chat, string prefix = "TKT", string language = "English") =>
         new(chat, Options.Create(new AnswerProviderOptions { TicketPrefix = prefix, TicketLanguage = language }), NullLogger<TicketGenerator>.Instance);
@@ -38,7 +38,7 @@ public class TicketGeneratorTests
         const string json = """{"summary":"Login broken","details":"User cannot log in","priority":"high"}""";
         var gen = CreateGenerator(new FakeChat(json));
 
-        var ticket = await gen.GenerateAsync(EmptySession(), "I can't log in", null);
+        var (ticket, _) = await gen.GenerateAsync(EmptySession(), "I can't log in", null);
 
         Assert.Equal("Login broken", ticket.AiSummary);
         Assert.Equal("User cannot log in", ticket.Details);
@@ -51,7 +51,7 @@ public class TicketGeneratorTests
     {
         var gen = CreateGenerator(new FakeChat("I'm sorry to hear that. Let me help you."));
 
-        var ticket = await gen.GenerateAsync(EmptySession(), "My order has a faulty product", null);
+        var (ticket, _) = await gen.GenerateAsync(EmptySession(), "My order has a faulty product", null);
 
         Assert.Equal("My order has a faulty product", ticket.AiSummary);
         Assert.Equal(string.Empty, ticket.Details);
@@ -62,7 +62,7 @@ public class TicketGeneratorTests
     public async Task GenerateAsync_MarkdownFencedJson_Parsed()
     {
         const string fenced = "```json\n{\"summary\":\"Faulty product\",\"details\":\"Order has damage\",\"priority\":\"high\"}\n```";
-        var ticket = await CreateGenerator(new FakeChat(fenced)).GenerateAsync(EmptySession(), "trigger", null);
+        var (ticket, _) = await CreateGenerator(new FakeChat(fenced)).GenerateAsync(EmptySession(), "trigger", null);
 
         Assert.Equal("Faulty product", ticket.AiSummary);
         Assert.Equal("Order has damage", ticket.Details);
@@ -106,7 +106,7 @@ public class TicketGeneratorTests
         var contact = new ContactInfo("user@example.com", null);
         var gen = CreateGenerator(new FakeChat(json));
 
-        var ticket = await gen.GenerateAsync(EmptySession(), "trigger", contact);
+        var (ticket, _) = await gen.GenerateAsync(EmptySession(), "trigger", contact);
 
         Assert.Equal(contact, ticket.Contact);
     }
@@ -118,10 +118,13 @@ public class TicketGeneratorTests
         var capture = new CapturingChat(json);
         var gen = CreateGenerator(capture);
         var session = new ConversationSession(
-        [
-            new ChatMessage(ChatRole.System, "old system prompt"),
-            new ChatMessage(ChatRole.User, "hello"),
-        ], DateTimeOffset.UtcNow);
+            FullHistory:
+            [
+                new ChatMessage(ChatRole.System, "old system prompt"),
+                new ChatMessage(ChatRole.User, "hello"),
+            ],
+            SendHistory: [],
+            LastActivity: DateTimeOffset.UtcNow);
 
         await gen.GenerateAsync(session, "trigger", null);
 
@@ -138,7 +141,7 @@ public class TicketGeneratorTests
     public async Task GenerateAsync_PriorityUrgent_Parsed()
     {
         const string json = """{"summary":"s","details":"d","priority":"urgent"}""";
-        var ticket = await CreateGenerator(new FakeChat(json)).GenerateAsync(EmptySession(), "t", null);
+        var (ticket, _) = await CreateGenerator(new FakeChat(json)).GenerateAsync(EmptySession(), "t", null);
         Assert.Equal(TicketPriority.Urgent, ticket.SuggestedPriority);
     }
 
@@ -146,7 +149,7 @@ public class TicketGeneratorTests
     public async Task GenerateAsync_PriorityLow_Parsed()
     {
         const string json = """{"summary":"s","details":"d","priority":"low"}""";
-        var ticket = await CreateGenerator(new FakeChat(json)).GenerateAsync(EmptySession(), "t", null);
+        var (ticket, _) = await CreateGenerator(new FakeChat(json)).GenerateAsync(EmptySession(), "t", null);
         Assert.Equal(TicketPriority.Low, ticket.SuggestedPriority);
     }
 
@@ -154,7 +157,7 @@ public class TicketGeneratorTests
     public async Task GenerateAsync_UnknownPriority_DefaultsMedium()
     {
         const string json = """{"summary":"s","details":"d","priority":"critical"}""";
-        var ticket = await CreateGenerator(new FakeChat(json)).GenerateAsync(EmptySession(), "t", null);
+        var (ticket, _) = await CreateGenerator(new FakeChat(json)).GenerateAsync(EmptySession(), "t", null);
         Assert.Equal(TicketPriority.Medium, ticket.SuggestedPriority);
     }
 
@@ -162,7 +165,7 @@ public class TicketGeneratorTests
     public async Task GenerateAsync_CustomPrefix_UsedInTicketId()
     {
         const string json = """{"summary":"s","details":"d","priority":"low"}""";
-        var ticket = await CreateGenerator(new FakeChat(json), prefix: "ACME").GenerateAsync(EmptySession(), "t", null);
+        var (ticket, _) = await CreateGenerator(new FakeChat(json), prefix: "ACME").GenerateAsync(EmptySession(), "t", null);
         Assert.StartsWith("ACME-", ticket.TicketId);
     }
 
@@ -197,24 +200,24 @@ public class TicketGeneratorTests
     private sealed class FakeChat(string response) : ILlmChatClient
     {
         public string Name => "fake";
-        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken ct = default) =>
-            Task.FromResult(response);
+        public Task<LlmChatResult> ChatAsync(IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken ct = default) =>
+            Task.FromResult(new LlmChatResult(response));
         public async IAsyncEnumerable<string> ChatStreamingAsync(IReadOnlyList<ChatMessage> messages,
-            [EnumeratorCancellation] CancellationToken ct = default)
-        { yield return response; await Task.Yield(); }
+            bool jsonObject = false, Action<int>? onUsage = null, [EnumeratorCancellation] CancellationToken ct = default)
+        { yield return response; onUsage?.Invoke(0); await Task.Yield(); }
     }
 
     private sealed class CapturingChat(string response) : ILlmChatClient
     {
         public string Name => "capturing";
         public IReadOnlyList<ChatMessage>? LastMessages { get; private set; }
-        public Task<string> ChatAsync(IReadOnlyList<ChatMessage> messages, CancellationToken ct = default)
+        public Task<LlmChatResult> ChatAsync(IReadOnlyList<ChatMessage> messages, bool jsonObject = false, CancellationToken ct = default)
         {
             LastMessages = messages;
-            return Task.FromResult(response);
+            return Task.FromResult(new LlmChatResult(response));
         }
         public async IAsyncEnumerable<string> ChatStreamingAsync(IReadOnlyList<ChatMessage> messages,
-            [EnumeratorCancellation] CancellationToken ct = default)
-        { yield return response; await Task.Yield(); }
+            bool jsonObject = false, Action<int>? onUsage = null, [EnumeratorCancellation] CancellationToken ct = default)
+        { yield return response; onUsage?.Invoke(0); await Task.Yield(); }
     }
 }

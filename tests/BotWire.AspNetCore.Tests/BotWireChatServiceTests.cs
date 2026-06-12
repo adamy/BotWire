@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 using BotWire.AspNetCore.Tests.Fakes;
+using BotWire.Core.Audit;
 using BotWire.Core.Enums;
 using BotWire.Core.Guard;
 using BotWire.Core.Models;
@@ -31,13 +32,25 @@ public class BotWireChatServiceTests
         FakeAnswerProvider? answers = null,
         int maxMsg  = 2000,
         int maxRpm  = 1000,
-        bool piiBlocks = false)
+        bool piiBlocks = false,
+        RateLimitOptions? rateLimits = null)
     {
         var store   = new FakeConversationStore();
         answers   ??= new FakeAnswerProvider();
 
         var rateLimiter = new IpRateLimiter(
             Options.Create(new RateLimiterOptions { MaxRequestsPerIpPerMinute = maxRpm }));
+
+        // Five-dimension limiter disabled by default so it never perturbs unrelated assertions;
+        // tests that target a dimension pass an explicit `rateLimits`.
+        var rlOptions = Options.Create(rateLimits ?? new RateLimitOptions
+        {
+            MaxConcurrentSessions = 0,
+            MaxMessagesPerMinute = 0,
+            MaxMessagesPerSession = 0,
+            MaxSessionsPerIpPerHour = 0,
+            DailyTokenBudget = 0,
+        });
 
         var svc = new BotWireChatService(
             answers,
@@ -46,6 +59,10 @@ public class BotWireChatServiceTests
             piiBlocks ? FakePiiGuard.Block : FakePiiGuard.Allow,
             NullPromptInjectionGuard.Instance,
             rateLimiter,
+            new RateLimiter(rlOptions),
+            rlOptions,
+            new FakeSummaryCompressor(),
+            NullAuditLogger.Instance,
             Options.Create(new BotWireOptions { MaxMessageLength = maxMsg }),
             Options.Create(new PiiGuardOptions()));
 
@@ -161,7 +178,8 @@ public class BotWireChatServiceTests
         var (svc, _) = Create();
         var result = await svc.AnswerAsync(ChatReq(token: "no-such-token"), "1.2.3.4");
         Assert.Equal(400, result.HttpStatusCode);
-        Assert.Equal("Blocked", result.Status);
+        // Stable machine-readable marker the widget uses to self-heal stale sessions
+        Assert.Equal("InvalidSession", result.Status);
     }
 
     [Fact]
@@ -204,6 +222,16 @@ public class BotWireChatServiceTests
         Assert.True(store.Contains(prep.Token!));
     }
 
+    [Fact]
+    public async Task PrepareStreamAsync_InvalidToken_ReturnsInvalidSession400()
+    {
+        var (svc, _) = Create();
+        var prep = await svc.PrepareStreamAsync(ChatReq(token: "no-such-token"), "1.2.3.4");
+        Assert.NotNull(prep.Error);
+        Assert.Equal(400, prep.Error!.HttpStatusCode);
+        Assert.Equal("InvalidSession", prep.Error.Status);
+    }
+
     // ── CommitStreamAsync ─────────────────────────────────────────────────────────
 
     [Fact]
@@ -214,9 +242,12 @@ public class BotWireChatServiceTests
         await svc.CommitStreamAsync(prep, accumulatedText: "Hello!", escalationStarted: false, confirmedTicketId: null);
 
         var session = store.Get(prep.Token!);
-        Assert.Equal(2, session!.History.Count);
-        Assert.Equal("Hi",     session.History[0].Content);
-        Assert.Equal("Hello!", session.History[1].Content);
+        Assert.Equal(2, session!.FullHistory.Count);
+        Assert.Equal("Hi",     session.FullHistory[0].Content);
+        Assert.Equal("Hello!", session.FullHistory[1].Content);
+        // Send-history mirrors full-history when the pass-through compressor makes no change.
+        Assert.Equal(2, session.SendHistory.Count);
+        Assert.Equal("Hello!", session.SendHistory[1].Content);
         Assert.False(session.EscalationPending);
     }
 
@@ -247,5 +278,78 @@ public class BotWireChatServiceTests
         var session = store.Get(prep.Token!);
         Assert.False(session!.EscalationPending);
         Assert.Null(session.EscalationTriggerMessage);
+    }
+
+    // ── Five-dimension rate limiting (design 008) ─────────────────────────────────
+
+    [Fact]
+    public async Task AnswerAsync_SessionMessageCap_ReturnsPromptToStartNewChat()
+    {
+        var rl = new RateLimitOptions { MaxMessagesPerSession = 2 };
+        var (svc, store) = Create(rateLimits: rl);
+
+        // Seed a session already at the cap (2 user messages).
+        await store.SaveAsync("seeded", new ConversationSession(
+            [new ChatMessage(ChatRole.User, "one"), new ChatMessage(ChatRole.User, "two")],
+            [], DateTimeOffset.UtcNow));
+
+        var result = await svc.AnswerAsync(ChatReq(token: "seeded"), "1.2.3.4");
+        Assert.Equal(200, result.HttpStatusCode);
+        Assert.Equal("RateLimited", result.Status);
+        Assert.Equal(rl.SessionMessageCapMessage, result.Message);
+    }
+
+    [Fact]
+    public async Task CommitStreamAsync_OffTopic_PersistsAssistantTurnFromOffTopicMessage()
+    {
+        var (svc, store) = Create();
+        var prep = await svc.PrepareStreamAsync(ChatReq("what is the weather?"), "1.2.3.4");
+
+        // Streaming off-topic: no text streamed — only the off-topic message + raw JSON + tokens.
+        await svc.CommitStreamAsync(
+            prep, accumulatedText: "", escalationStarted: false, confirmedTicketId: null,
+            rawResponse: "{\"offtopic\":true,\"action\":\"answer\",\"message\":\"off-topic reply\"}",
+            tokensUsed: 42, offTopicMessage: "off-topic reply");
+
+        var session = store.Get(prep.Token!);
+        Assert.Equal(2, session!.FullHistory.Count);
+        Assert.Equal("off-topic reply", session.FullHistory[1].Content);
+        // Send-history carries the raw JSON envelope, not the display text.
+        Assert.Contains("offtopic", session.SendHistory[1].Content);
+    }
+
+    [Fact]
+    public async Task InitSessionAsync_PerIpHourCap_Returns429()
+    {
+        var rl = new RateLimitOptions { MaxSessionsPerIpPerHour = 1 };
+        var (svc, _) = Create(rateLimits: rl);
+
+        var (firstError, _, _) = await svc.InitSessionAsync(SessionReq(), "1.2.3.4");
+        Assert.Null(firstError);
+
+        var (secondError, _, _) = await svc.InitSessionAsync(SessionReq(), "1.2.3.4");
+        Assert.NotNull(secondError);
+        Assert.Equal(429, secondError!.HttpStatusCode);
+        Assert.Equal(rl.IpSessionCapMessage, secondError.Message);
+    }
+
+    [Fact]
+    public async Task AnswerAsync_DailyTokenBudget_DegradesAfterBudgetSpent()
+    {
+        var rl = new RateLimitOptions { DailyTokenBudget = 10 };
+        var answers = new FakeAnswerProvider
+        {
+            Result = new AnswerResult(AnswerStatus.Answered, "Here you go.", TokensUsed: 25),
+        };
+        var (svc, _) = Create(answers, rateLimits: rl);
+
+        // First call is under budget at entry; it answers and pushes usage over the budget.
+        var first = await svc.AnswerAsync(ChatReq(), "1.2.3.4");
+        Assert.Equal("Answered", first.Status);
+
+        // Budget now exhausted — the next call returns the degraded message without answering.
+        var second = await svc.AnswerAsync(ChatReq(), "1.2.3.4");
+        Assert.Equal("RateLimited", second.Status);
+        Assert.Equal(rl.TokenBudgetMessage, second.Message);
     }
 }

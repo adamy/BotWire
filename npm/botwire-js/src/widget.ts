@@ -1,13 +1,63 @@
 // BotWire Web Component — zero-dependency chat widget
 // Shadow DOM isolation, SSE streaming via fetch + ReadableStream.
 
+import { BotWireClient, BotWireError } from './client.js';
+
 const STORAGE_KEY = 'botwire_session';
 
-type SseEvent =
-  | { type: 'token';           value: string }
-  | { type: 'collect_contact'                }
-  | { type: 'escalated';       ticketId: string; message: string }
-  | { type: 'blocked';         reason: string };
+// ── i18n ───────────────────────────────────────────────────────────────────────
+// Built-in UI translations. A host-supplied data-* attribute always takes
+// precedence over these (see BotWireWidget.t). The `en` table holds the exact
+// Phase-1 defaults so en / no data-lang behaviour is unchanged.
+
+type StringKey =
+  | 'title' | 'greeting' | 'placeholder' | 'sendLabel'
+  | 'contactPrompt' | 'emailPlaceholder' | 'submitLabel' | 'cancelLabel' | 'cancelMessage';
+
+const TRANSLATIONS: Record<string, Record<StringKey, string>> = {
+  en: {
+    title:            'Support',
+    greeting:         'How can we help you today?',
+    placeholder:      'Type a message…',
+    sendLabel:        'Send',
+    contactPrompt:    'Please leave your email address so our team can follow up with you.',
+    emailPlaceholder: 'your@email.com',
+    submitLabel:      'Submit',
+    cancelLabel:      'Cancel',
+    cancelMessage:    'You have ended this conversation.',
+  },
+  'zh-CN': {
+    title:            '在线客服',
+    greeting:         '请问有什么可以帮您？',
+    placeholder:      '输入消息…',
+    sendLabel:        '发送',
+    contactPrompt:    '请留下您的邮箱，方便我们的团队跟进。',
+    emailPlaceholder: 'your@email.com',
+    submitLabel:      '提交',
+    cancelLabel:      '取消',
+    cancelMessage:    '您已结束本次会话。',
+  },
+  ja: {
+    title:            'サポート',
+    greeting:         'ご用件をお知らせください。',
+    placeholder:      'メッセージを入力…',
+    sendLabel:        '送信',
+    contactPrompt:    'メールアドレスをご記入いただければ、担当者よりご連絡いたします。',
+    emailPlaceholder: 'your@email.com',
+    submitLabel:      '送信する',
+    cancelLabel:      'キャンセル',
+    cancelMessage:    'この会話を終了しました。',
+  },
+};
+
+/** Normalise a data-lang value to a translation-table key; unknown → 'en'. */
+function normaliseLang(lang: string | undefined): string {
+  if (!lang) return 'en';
+  const l = lang.toLowerCase();
+  if (l === 'zh' || l.startsWith('zh-') || l.startsWith('zh_')) return 'zh-CN';
+  if (l === 'ja' || l.startsWith('ja-') || l.startsWith('ja_')) return 'ja';
+  return 'en';
+}
 
 // ── CSS ──────────────────────────────────────────────────────────────────────
 
@@ -49,12 +99,16 @@ function buildCss(primary: string, position: string, greeting: string): string {
   display:flex;align-items:center;justify-content:space-between;gap:8px;
   padding:14px 16px;background:${primary};color:#fff;flex-shrink:0;
 }
-#header-title{font-weight:600;font-size:15px}
-#close{
+#header-title{font-weight:600;font-size:15px;flex:1}
+#header-actions{display:flex;align-items:center;gap:2px}
+#reset,#close{
   background:none;border:none;color:#fff;cursor:pointer;
   font-size:20px;line-height:1;padding:2px 6px;border-radius:6px;opacity:.75;
+  display:flex;align-items:center;
 }
-#close:hover{opacity:1;background:rgba(255,255,255,.15)}
+#reset[hidden]{display:none!important}
+#reset svg{width:17px;height:17px;fill:#fff}
+#reset:hover,#close:hover{opacity:1;background:rgba(255,255,255,.15)}
 
 #messages{
   flex:1;overflow-y:auto;padding:12px 12px 4px;
@@ -89,6 +143,18 @@ function buildCss(primary: string, position: string, greeting: string): string {
 #typing span:nth-child(2){animation-delay:.15s}
 #typing span:nth-child(3){animation-delay:.3s}
 @keyframes bw-dot{0%,80%,100%{transform:scale(.6);opacity:.4}40%{transform:scale(1);opacity:1}}
+
+#starters{
+  display:flex;flex-wrap:wrap;gap:8px;
+  padding:4px 12px 12px;flex-shrink:0;
+}
+#starters[hidden]{display:none!important}
+.starter{
+  background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;border-radius:999px;
+  padding:7px 14px;cursor:pointer;font:inherit;font-size:13px;
+  transition:background .15s,border-color .15s;
+}
+.starter:hover{background:#e2e8f0;border-color:#cbd5e1}
 
 #input-area{
   display:flex;gap:8px;align-items:flex-end;
@@ -156,14 +222,16 @@ function buildCss(primary: string, position: string, greeting: string): string {
 
 const ICON_CHAT = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z"/></svg>`;
 const ICON_CLOSE_CHAT = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2zM6 10h12v2H6v-2zm0-4h12v2H6V6zm8 8H6v-2h8v2z"/></svg>`;
+const ICON_RESET = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M17.65 6.35A7.96 7.96 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4l-2.35 2.35z"/></svg>`;
 
 // ── Web Component ─────────────────────────────────────────────────────────────
 
 class BotWireWidget extends HTMLElement {
   private readonly shadow: ShadowRoot;
+  private client!:       BotWireClient;
 
-  private sessionToken:  string | null = null;
   private streaming      = false;
+  private streamAbort: AbortController | null = null;
   private awaitingEmail  = false;
   private ticketCreated  = false;
   private errorOccurred  = false;
@@ -173,6 +241,8 @@ class BotWireWidget extends HTMLElement {
   private panel!:     HTMLElement;
   private bubble!:    HTMLButtonElement;
   private messages!:  HTMLElement;
+  private startersBox!: HTMLElement;
+  private resetBtn!:  HTMLButtonElement;
   private typing!:    HTMLElement;
   private inputArea!: HTMLElement;
   private input!:     HTMLTextAreaElement;
@@ -189,26 +259,45 @@ class BotWireWidget extends HTMLElement {
 
   // ── Attribute helpers ───────────────────────────────────────────────────────
 
-  private get endpoint():         string           { return this.dataset['endpoint']         ?? '/support'; }
-  private get widgetTitle():      string           { return this.dataset['title']            ?? 'Support'; }
-  private get primary():          string           { return this.dataset['primaryColor']     ?? '#6366f1'; }
-  private get position():         string           { return this.dataset['position']         ?? 'bottom-right'; }
+  private get endpoint():         string           { return this.dataset['endpoint']     ?? '/support'; }
+  private get primary():          string           { return this.dataset['primaryColor'] ?? '#6366f1'; }
+  private get position():         string           { return this.dataset['position']     ?? 'bottom-right'; }
   private get publicKey():        string|undefined { return this.dataset['publicKey']; }
-  private get placeholder():      string           { return this.dataset['placeholder']      ?? 'Type a message…'; }
-  private get contactPrompt():    string           { return this.dataset['contactPrompt']    ?? 'Please leave your email address so our team can follow up with you.'; }
-  private get emailPlaceholder(): string           { return this.dataset['emailPlaceholder'] ?? 'your@email.com'; }
-  private get sendLabel():        string           { return this.dataset['sendLabel']        ?? 'Send'; }
-  private get submitLabel():      string           { return this.dataset['submitLabel']      ?? 'Submit'; }
-  private get cancelLabel():      string           { return this.dataset['cancelLabel']      ?? 'Cancel'; }
-  private get cancelMessage():    string           { return this.dataset['cancelMessage']    ?? 'You have ended this conversation.'; }
-  private get greeting():         string           { return this.dataset['greeting']         ?? 'How can we help you today?'; }
+  private get offtopicMessage():  string|undefined { return this.dataset['offtopicMessage']; }
+  private get resetEnabled():     boolean          { return this.dataset['reset']        !== 'false'; }
+  private get resetConfirm():     boolean          { return this.dataset['resetConfirm'] !== 'false'; }
+
+  // Localised UI strings: a host data-* attribute wins, else the data-lang table, else en.
+  private get langKey():          string { return normaliseLang(this.dataset['lang']); }
+  private t(key: StringKey): string {
+    const override = this.dataset[key];
+    if (override !== undefined) return override;
+    return TRANSLATIONS[this.langKey]?.[key] ?? TRANSLATIONS['en']![key];
+  }
+
+  private get widgetTitle():      string { return this.t('title'); }
+  private get placeholder():      string { return this.t('placeholder'); }
+  private get contactPrompt():    string { return this.t('contactPrompt'); }
+  private get emailPlaceholder(): string { return this.t('emailPlaceholder'); }
+  private get sendLabel():        string { return this.t('sendLabel'); }
+  private get submitLabel():      string { return this.t('submitLabel'); }
+  private get cancelLabel():      string { return this.t('cancelLabel'); }
+  private get cancelMessage():    string { return this.t('cancelMessage'); }
+  private get greeting():         string { return this.t('greeting'); }
+
+  /** Pipe-separated conversation starters, or [] when not configured. */
+  private get starters(): string[] {
+    return (this.dataset['starters'] ?? '')
+      .split('|').map(s => s.trim()).filter(s => s.length > 0);
+  }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   connectedCallback(): void {
     this.mount();
-    this.sessionToken = sessionStorage.getItem(STORAGE_KEY);
-    if (!this.sessionToken) void this.initSession();
+    this.client = new BotWireClient({ endpoint: this.endpoint, publicKey: this.publicKey });
+    this.client.setSessionToken(sessionStorage.getItem(STORAGE_KEY));
+    if (!this.client.getSessionToken()) void this.initSession();
   }
 
   // ── Mount ───────────────────────────────────────────────────────────────────
@@ -220,9 +309,13 @@ class BotWireWidget extends HTMLElement {
 <div id="panel" hidden role="dialog" aria-label="${this.esc(this.widgetTitle)} support chat">
   <div id="header">
     <span id="header-title">${this.esc(this.widgetTitle)}</span>
-    <button id="close" aria-label="Close chat">✕</button>
+    <div id="header-actions">
+      <button id="reset" type="button" hidden aria-label="Reset conversation">${ICON_RESET}</button>
+      <button id="close" aria-label="Close chat">✕</button>
+    </div>
   </div>
   <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+  <div id="starters" hidden></div>
   <div id="typing" hidden aria-hidden="true"><span></span><span></span><span></span></div>
   <div id="input-area">
     <textarea id="input" placeholder="${this.esc(this.placeholder)}" rows="1" aria-label="Message input"></textarea>
@@ -242,6 +335,8 @@ class BotWireWidget extends HTMLElement {
     this.panel     = this.q('#panel');
     this.bubble    = this.q<HTMLButtonElement>('#bubble');
     this.messages  = this.q('#messages');
+    this.startersBox = this.q('#starters');
+    this.resetBtn  = this.q<HTMLButtonElement>('#reset');
     this.typing    = this.q('#typing');
     this.inputArea = this.q('#input-area');
     this.input     = this.q<HTMLTextAreaElement>('#input');
@@ -253,6 +348,7 @@ class BotWireWidget extends HTMLElement {
 
     this.bubble.addEventListener('click', () => this.toggle());
     this.q('#close').addEventListener('click', () => this.close());
+    this.resetBtn.addEventListener('click', () => this.handleReset());
     this.sendBtn.addEventListener('click', () => this.handleSend());
     this.input.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.handleSend(); }
@@ -263,19 +359,19 @@ class BotWireWidget extends HTMLElement {
       this.handleContactSubmit();
     });
     this.cancelBtn.addEventListener('click', () => this.handleContactCancel());
+
+    // Reset button shows by default; a host opts out with data-reset="false".
+    this.resetBtn.hidden = !this.resetEnabled;
+    this.renderStarters();
   }
 
   // ── Session init ────────────────────────────────────────────────────────────
 
   private async initSession(): Promise<void> {
     try {
-      const resp = await this.post(`${this.endpoint}/session`, {});
-      if (resp.ok) {
-        const data = await resp.json() as { sessionToken: string; errorMessage?: string };
-        this.sessionToken = data.sessionToken;
-        sessionStorage.setItem(STORAGE_KEY, data.sessionToken);
-        if (data.errorMessage) this.errorMessage = data.errorMessage;
-      }
+      const result = await this.client.initSession();
+      sessionStorage.setItem(STORAGE_KEY, result.sessionToken);
+      if (result.errorMessage) this.errorMessage = result.errorMessage;
     } catch {
       // Will retry on first send
     }
@@ -304,6 +400,8 @@ class BotWireWidget extends HTMLElement {
   }
 
   private resetConversation(): void {
+    this.streamAbort?.abort();   // cancel any in-flight turn so it can't write into the fresh session
+    this.streamAbort = null;
     this.messages.innerHTML = '';
     this.ticketCreated  = false;
     this.awaitingEmail  = false;
@@ -314,9 +412,43 @@ class BotWireWidget extends HTMLElement {
     this.inputArea.hidden = false;
     this.sendBtn.disabled = false;
     this.emailIn.value   = '';
-    this.sessionToken    = null;
+    this.client.setSessionToken(null);
     sessionStorage.removeItem(STORAGE_KEY);
+    this.renderStarters();
     void this.initSession();
+  }
+
+  // ── Reset button ──────────────────────────────────────────────────────────────
+
+  private handleReset(): void {
+    if (this.resetConfirm) {
+      const msg = this.dataset['resetConfirmMessage'] ?? 'Start a new conversation?';
+      if (typeof confirm === 'function' && !confirm(msg)) return;
+    }
+    this.resetConversation();
+    if (!this.panel.hidden && !this.awaitingEmail) this.input.focus();
+  }
+
+  // ── Conversation starters ───────────────────────────────────────────────────
+
+  /** (Re)render starter chips into an empty conversation; hide the row when none configured. */
+  private renderStarters(): void {
+    this.startersBox.innerHTML = '';
+    const starters = this.starters;
+    if (starters.length === 0) { this.startersBox.hidden = true; return; }
+
+    for (const text of starters) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'starter';
+      btn.textContent = text;
+      btn.addEventListener('click', () => {
+        this.input.value = text;
+        this.handleSend();
+      });
+      this.startersBox.appendChild(btn);
+    }
+    this.startersBox.hidden = false;
   }
 
   private close(): void {
@@ -334,6 +466,7 @@ class BotWireWidget extends HTMLElement {
     if (!text) return;
     this.input.value = '';
     this.autoResize();
+    this.startersBox.hidden = true; // starters only show on an empty conversation
     this.appendMessage('user', text);
     void this.stream(text);
   }
@@ -359,85 +492,73 @@ class BotWireWidget extends HTMLElement {
     this.sendBtn.disabled = true;
     this.typing.hidden = false;
 
-    if (!this.sessionToken) await this.initSession();
-
-    const body: Record<string, unknown> = { message, sessionToken: this.sessionToken };
-    if (contactEmail) body['contactEmail'] = contactEmail;
-
+    const controller = new AbortController();
+    this.streamAbort = controller;
     let botEl: HTMLElement | null = null;
 
     try {
-      const resp = await this.post(`${this.endpoint}/chat/stream`, body);
-
-      if (!resp.ok || !resp.body) {
+      for await (const evt of this.client.streamChat(message, { contactEmail, signal: controller.signal })) {
         this.typing.hidden = true;
-        this.errorOccurred = true;
-        this.appendMessage('sys', this.errorMessage);
-        return;
-      }
 
-      const reader  = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      let done = false;
+        switch (evt.type) {
+          case 'delta':
+            if (!botEl) botEl = this.appendMessage('bot', '');
+            botEl.textContent += evt.delta;
+            this.scrollBottom();
+            break;
 
-      while (!done) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buf += decoder.decode(chunk.value, { stream: true });
+          case 'collect_contact':
+            this.inputArea.hidden = true;
+            this.contact.hidden   = false;
+            this.awaitingEmail    = true;
+            // rAF: wait for layout reflow so messages area has shrunk before scrolling
+            requestAnimationFrame(() => { this.scrollBottom(); this.emailIn.focus(); });
+            break;
 
-        let nl: number;
-        while ((nl = buf.indexOf('\n')) !== -1) {
-          const line = buf.slice(0, nl);
-          buf = buf.slice(nl + 1);
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
+          case 'escalated':
+            this.ticketCreated      = true;
+            this.ticket.hidden      = false;
+            this.ticket.textContent = evt.message;
+            this.inputArea.hidden   = true;
+            break;
 
-          if (data === '[DONE]') { done = true; break; }
+          case 'blocked':
+            // In the stream path a `blocked` event is the off-topic guard (PII/length/injection
+            // are rejected before streaming). Show it as its own assistant bubble — never reuse a
+            // partially-streamed answer bubble. A host can override the wording with
+            // data-offtopic-message.
+            this.appendMessage('bot', this.offtopicMessage ?? evt.reason);
+            break;
 
-          let evt: SseEvent;
-          try { evt = JSON.parse(data) as SseEvent; } catch { continue; }
-
-          this.typing.hidden = true;
-
-          switch (evt.type) {
-            case 'token':
-              if (!botEl) botEl = this.appendMessage('bot', '');
-              botEl.textContent += evt.value;
-              this.scrollBottom();
-              break;
-
-            case 'collect_contact':
-              this.inputArea.hidden = true;
-              this.contact.hidden   = false;
-              this.awaitingEmail    = true;
-              // rAF: wait for layout reflow so messages area has shrunk before scrolling
-              requestAnimationFrame(() => { this.scrollBottom(); this.emailIn.focus(); });
-              break;
-
-            case 'escalated':
-              this.ticketCreated      = true;
-              this.ticket.hidden      = false;
-              this.ticket.textContent = evt.message;
-              this.inputArea.hidden   = true;
-              break;
-
-            case 'blocked':
-              this.appendMessage('sys', evt.reason);
-              break;
-          }
+          case 'done':
+            break;
         }
       }
     } catch (err) {
+      // A superseded stream (reset/close aborted it) must not touch the UI of the new turn.
+      if (controller.signal.aborted) return;
       this.typing.hidden = true;
-      if (!(err instanceof DOMException && err.name === 'AbortError'))
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // user navigated away / aborted — stay silent
+      } else if (err instanceof BotWireError) {
+        // server rejected the turn — surface the host-configured message
+        this.errorOccurred = true;
+        this.appendMessage('sys', this.errorMessage);
+      } else {
         this.appendMessage('sys', 'Connection error. Please try again.');
+      }
     } finally {
-      this.typing.hidden    = true;
-      this.streaming        = false;
-      if (!this.awaitingEmail && !this.ticketCreated) {
-        this.sendBtn.disabled = false;
-        if (!this.panel.hidden) this.input.focus();
+      // Only the active stream owns the shared state; an aborted/superseded one bows out.
+      if (this.streamAbort === controller) {
+        this.streamAbort = null;
+        const token = this.client.getSessionToken();
+        if (token) sessionStorage.setItem(STORAGE_KEY, token);
+        this.typing.hidden    = true;
+        this.streaming        = false;
+        if (!this.awaitingEmail && !this.ticketCreated) {
+          this.sendBtn.disabled = false;
+          if (!this.panel.hidden) this.input.focus();
+        }
       }
     }
   }
@@ -460,12 +581,6 @@ class BotWireWidget extends HTMLElement {
   private autoResize(): void {
     this.input.style.height = 'auto';
     this.input.style.height = `${Math.min(this.input.scrollHeight, 100)}px`;
-  }
-
-  private post(url: string, body: Record<string, unknown>): Promise<Response> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.publicKey) headers['X-BotWire-Key'] = this.publicKey;
-    return fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
   }
 
   private esc(s: string): string {

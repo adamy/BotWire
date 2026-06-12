@@ -60,8 +60,11 @@ public sealed class InMemoryConversationStore : IConversationStore, IDisposable
     /// <inheritdoc/>
     public Task SaveAsync(string token, ConversationSession session, CancellationToken cancellationToken = default)
     {
-        var history = TrimHistory(session.History, _options.MaxHistoryMessages);
-        var updated = session with { History = history, LastActivity = DateTimeOffset.UtcNow };
+        // Only the send-history is capped — it is what costs tokens on every request. FullHistory is
+        // stored intact so ticket generation always has the complete conversation. With summary
+        // compression enabled (SummaryInterval > 0) the send-history rarely reaches this cap.
+        var sendHistory = TrimHistory(session.SendHistory, _options.MaxHistoryMessages);
+        var updated = session with { SendHistory = sendHistory, LastActivity = DateTimeOffset.UtcNow };
         _sessions[token] = updated;
         return Task.CompletedTask;
     }

@@ -34,4 +34,12 @@ public sealed class OpenAIProviderOptions
     /// When <see langword="null"/>, the default OpenAI endpoint is used.
     /// </summary>
     public string? BaseUrl { get; set; }
+
+    /// <summary>
+    /// Sampling temperature for chat completions. Defaults to <c>0.2</c> — low, so a KB-grounded
+    /// support bot answers consistently instead of occasionally drifting or escalating an
+    /// answerable question. Raise it for more varied wording. Set <see langword="null"/> to omit
+    /// the parameter entirely and use the provider's own default.
+    /// </summary>
+    public float? Temperature { get; set; } = 0.2f;
 }

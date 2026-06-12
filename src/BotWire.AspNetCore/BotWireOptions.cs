@@ -45,8 +45,24 @@ public sealed class BotWireOptions
     /// <summary>Rate-limit cap per IP per minute.</summary>
     public int MaxRequestsPerIpPerMinute { get; set; } = 20;
 
+    /// <summary>
+    /// Five-dimension rate limiting (design 008): concurrent sessions, per-minute delay,
+    /// per-session message cap, new-sessions-per-IP-per-hour, and a daily token budget.
+    /// Each dimension is independently configurable and disabled when set to <c>0</c>.
+    /// </summary>
+    public RateLimitOptions RateLimiting { get; set; } = new();
+
     /// <summary>Idle TTL for conversation sessions.</summary>
     public TimeSpan SessionTtl { get; set; } = TimeSpan.FromHours(2);
+
+    /// <summary>
+    /// Number of recent messages kept verbatim in the history sent to the answer LLM.
+    /// Once the send-history grows past twice this value, the oldest messages are folded into a
+    /// single LLM-generated summary system message to bound token cost on long conversations.
+    /// The full conversation is always preserved separately for ticket generation.
+    /// Defaults to 20. Set to 0 to disable summary compression (not recommended).
+    /// </summary>
+    public int SummaryInterval { get; set; } = 20;
 
     /// <summary>Chat completion provider. Required at startup.</summary>
     public OpenAIProviderOptions? ChatProvider { get; set; }
@@ -75,6 +91,21 @@ public sealed class BotWireOptions
     /// Defaults to <c>"Something went wrong. Please try again."</c>.
     /// </summary>
     public string ErrorMessage { get; set; } = "Something went wrong. Please try again.";
+
+    /// <summary>
+    /// Reply shown when a message is classified off-topic. Only takes effect when
+    /// <see cref="TopicDescription"/> is set (which enables the topic guard).
+    /// </summary>
+    public string OffTopicResponse { get; set; } =
+        "I'm sorry, I can only help with questions related to our support topics. " +
+        "Is there something along those lines I can help you with?";
+
+    /// <summary>
+    /// Maximum number of LLM attempts for a single turn when the response is empty or invalid
+    /// (malformed JSON or a blank message). After this many failures the turn escalates to a human
+    /// instead of showing a blank answer. Defaults to 3.
+    /// </summary>
+    public int MaxAnswerAttempts { get; set; } = 3;
 
     /// <summary>
     /// Message shown to the customer in the widget after a support ticket is confirmed.

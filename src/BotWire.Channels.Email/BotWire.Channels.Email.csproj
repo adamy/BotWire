@@ -5,17 +5,17 @@
     <Authors>Object IT Limited</Authors>
     <Company>Object IT Limited</Company>
     <Description>Email notification channel for BotWire — delivers escalated support tickets to your team via SMTP (MailKit). Commercial licenses available for proprietary use.</Description>
-    <PackageTags>botwire;chatbot;customer-support;email;smtp</PackageTags>
+    <PackageTags>botwire;customer-support;email;smtp;mailkit;notifications;helpdesk;support-bot</PackageTags>
     <PackageProjectUrl>https://github.com/adamy/BotWire</PackageProjectUrl>
     <RepositoryUrl>https://github.com/adamy/BotWire</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>NUGET.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\NUGET.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

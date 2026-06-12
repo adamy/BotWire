@@ -5,17 +5,17 @@
     <Authors>Object IT Limited</Authors>
     <Company>Object IT Limited</Company>
     <Description>Add a 24/7 AI customer-support bot to your ASP.NET Core site with AddBotWire() + MapBotWire(). Embedded zero-dependency chat widget, SSE streaming, escalation and ticket creation. Bring your own OpenAI-compatible API key — no SaaS fees. Commercial licenses available for proprietary use.</Description>
-    <PackageTags>botwire;chatbot;customer-support;aspnetcore;middleware</PackageTags>
+    <PackageTags>botwire;ai;chatbot;customer-support;aspnetcore;chat-widget;rag;openai;llm;gpt;sse;self-hosted;support-bot;helpdesk</PackageTags>
     <PackageProjectUrl>https://github.com/adamy/BotWire</PackageProjectUrl>
     <RepositoryUrl>https://github.com/adamy/BotWire</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>NUGET.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\NUGET.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <!-- Microsoft.Extensions.* 10.x packages predate net6.0 support; suppress their TFM warnings
@@ -38,14 +38,21 @@
   </ItemGroup>
 
   <!--
-    Rebuild the widget bundle whenever widget.ts changes.
+    Rebuild the widget bundle whenever any widget/SDK source changes.
     Conditioned on net10.0 so it runs exactly once in a multi-targeted build.
-    Inputs/Outputs enables incremental build — skipped when widget.ts is older than botwire.js.
+    Inputs/Outputs enables incremental build — the bundle is rebuilt when any source under
+    npm/botwire-js/src is newer than botwire.js. widget.ts imports the SDK (client/types), so all
+    of src must be tracked, not just widget.ts, or an SDK edit would ship a stale embedded widget.
+    BeforeTargets includes CoreCompile so the refreshed botwire.js is embedded in the same build
+    (BeforeTargets="Build" alone can leave the assembly's embedded resource one build behind).
   -->
+  <ItemGroup>
+    <BotWireWidgetSource Include="$(MSBuildThisFileDirectory)..\..\npm\botwire-js\src\**\*.ts" />
+  </ItemGroup>
   <Target Name="BuildBotWireWidget"
-          BeforeTargets="Build"
+          BeforeTargets="Build;CoreCompile"
           Condition="'$(TargetFramework)' == 'net10.0'"
-          Inputs="$(MSBuildThisFileDirectory)..\..\npm\botwire-js\src\widget.ts"
+          Inputs="@(BotWireWidgetSource)"
           Outputs="$(MSBuildThisFileDirectory)botwire.js">
     <Message Text="BotWire: building widget..." Importance="high" />
     <Exec Command="npm install"

@@ -14,7 +14,11 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using BotWire.Core.Abstractions;
+using BotWire.Core.Audit;
+using BotWire.Core.Conversation;
 using BotWire.Core.Enums;
 using BotWire.Core.Guard;
 using BotWire.Core.Models;
@@ -57,6 +61,10 @@ internal sealed class BotWireChatService
     private readonly IPiiGuard _piiGuard;
     private readonly IPromptInjectionGuard _injectionGuard;
     private readonly IpRateLimiter _rateLimiter;
+    private readonly RateLimiter _rl;
+    private readonly RateLimitOptions _rlOptions;
+    private readonly ISummaryCompressor _compressor;
+    private readonly IAuditLogger _audit;
     private readonly IOptions<BotWireOptions> _options;
     private readonly IOptions<PiiGuardOptions> _piiOptions;
 
@@ -67,6 +75,10 @@ internal sealed class BotWireChatService
         IPiiGuard piiGuard,
         IPromptInjectionGuard injectionGuard,
         IpRateLimiter rateLimiter,
+        RateLimiter rl,
+        IOptions<RateLimitOptions> rlOptions,
+        ISummaryCompressor compressor,
+        IAuditLogger audit,
         IOptions<BotWireOptions> options,
         IOptions<PiiGuardOptions> piiOptions)
     {
@@ -76,6 +88,10 @@ internal sealed class BotWireChatService
         _piiGuard       = piiGuard;
         _injectionGuard = injectionGuard;
         _rateLimiter    = rateLimiter;
+        _rl             = rl;
+        _rlOptions      = rlOptions.Value;
+        _compressor     = compressor;
+        _audit          = audit;
         _options        = options;
         _piiOptions     = piiOptions;
     }
@@ -87,22 +103,52 @@ internal sealed class BotWireChatService
     /// </summary>
     public async Task<ChatResult> AnswerAsync(ChatRequest req, string clientIp, CancellationToken ct = default)
     {
-        var guard = CheckGuards(req.Message, req.SessionToken, clientIp);
+        var guard = await CheckGuardsAsync(req.Message, req.SessionToken, clientIp, ct);
         if (guard is not null) return guard;
 
         var (token, session) = await ResolveSessionAsync(req.SessionToken, ct);
         if (session is null)
-            return new ChatResult("Blocked", "Invalid session token.", "", null, 400);
+            return new ChatResult("InvalidSession", "Invalid session token.", "", null, 400);
+
+        // Rate-limit dimensions that short-circuit with a user-facing message (HTTP 200).
+        var capped = await CheckRateCapsAsync(token, session, ct);
+        if (capped is not null) return capped;
+
+        await _audit.LogAsync(AuditEvents.UserMessage(token, req.Message), ct);
 
         var contact = BuildContact(req.ContactEmail, session);
 
-        var result = await _answers.AnswerAsync(req.Message, session, contact, ct);
+        AnswerResult result;
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            // Concurrency slot (queue, never reject) + per-minute throttle (delay, never reject).
+            using var slot = await _rl.AcquireConcurrencySlotAsync(ct);
+            await _rl.DelayForPerMinuteAsync(token, ct);
+            result = await _answers.AnswerAsync(req.Message, session, contact, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await _audit.LogAsync(AuditEvents.Error(token, ex.Message), CancellationToken.None);
+            throw;
+        }
+        sw.Stop();
+
+        _rl.AddTokens(result.TokensUsed);
         await SaveAnswerAsync(token, session, req.Message, result, ct);
+
+        await _audit.LogAsync(
+            AuditEvents.AssistantMessage(token, result.Message, result.RawResponse, sw.ElapsedMilliseconds, tokens: result.TokensUsed), ct);
+        if (result.Status == AnswerStatus.NeedHuman)
+            await _audit.LogAsync(AuditEvents.Escalated(token, "NEED_HUMAN"), ct);
+        else if (result.Status == AnswerStatus.TicketCreated)
+            await _audit.LogAsync(AuditEvents.Escalated(token, "NEED_HUMAN", result.Message), ct);
 
         return result.Status switch
         {
             AnswerStatus.TicketCreated => new ChatResult("TicketCreated", null,          token, result.Message),
             AnswerStatus.NeedHuman     => new ChatResult("NeedHuman",     result.Message, token, null),
+            AnswerStatus.OffTopic      => new ChatResult("OffTopic",      result.Message, token, null),
             _                          => new ChatResult("Answered",      result.Message, token, null),
         };
     }
@@ -115,17 +161,21 @@ internal sealed class BotWireChatService
     /// </summary>
     public async Task<StreamPrep> PrepareStreamAsync(ChatRequest req, string clientIp, CancellationToken ct = default)
     {
-        var guard = CheckGuards(req.Message, req.SessionToken, clientIp);
+        var guard = await CheckGuardsAsync(req.Message, req.SessionToken, clientIp, ct);
         if (guard is not null)
             return new StreamPrep(guard, null, null, null, null);
 
         var (token, session) = await ResolveSessionAsync(req.SessionToken, ct);
         if (session is null)
             return new StreamPrep(
-                new ChatResult("Blocked", "Invalid session token.", "", null, 400),
+                new ChatResult("InvalidSession", "Invalid session token.", "", null, 400),
                 null, null, null, null);
 
         var contact = BuildContact(req.ContactEmail, session);
+
+        // Skip the empty placeholder sent when submitting the contact form.
+        if (!string.IsNullOrWhiteSpace(req.Message))
+            await _audit.LogAsync(AuditEvents.UserMessage(token, req.Message), ct);
 
         return new StreamPrep(null, token, session, contact, req.Message);
     }
@@ -139,32 +189,76 @@ internal sealed class BotWireChatService
     /// Streams bot events for an already-prepared request.
     /// Call after <see cref="PrepareStreamAsync"/>; call <see cref="CommitStreamAsync"/> on completion.
     /// </summary>
-    public IAsyncEnumerable<BotEvent> StreamEventsAsync(StreamPrep prep, CancellationToken ct)
-        => _answers.StreamAsync(prep.UserMessage!, prep.Session!, prep.Contact, ct);
+    public async IAsyncEnumerable<BotEvent> StreamEventsAsync(
+        StreamPrep prep, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var token = prep.Token!;
+        var session = prep.Session!;
 
-    public Task CommitStreamAsync(
+        // Per-session cap and daily token budget degrade to a plain streamed message rather than
+        // an SSE error, so the widget renders them like any other reply.
+        var capped = await CheckRateCapsAsync(token, session, ct);
+        if (capped is not null)
+        {
+            yield return BotEvent.TextChunk(capped.Message!);
+            yield return BotEvent.Done(new AnswerResult(AnswerStatus.Answered, capped.Message!));
+            yield break;
+        }
+
+        // Concurrency slot is held for the whole stream; `await foreach` disposes this enumerator
+        // (and releases the slot) on normal completion, cancellation, and faults alike.
+        using var slot = await _rl.AcquireConcurrencySlotAsync(ct);
+        await _rl.DelayForPerMinuteAsync(token, ct);
+
+        await foreach (var evt in _answers.StreamAsync(prep.UserMessage!, session, prep.Contact, ct))
+            yield return evt;
+    }
+
+    public async Task CommitStreamAsync(
         StreamPrep prep,
         string accumulatedText,
         bool escalationStarted,
         string? confirmedTicketId,
         bool failedOpen = false,
+        string? rawResponse = null,
+        int tokensUsed = 0,
+        string? offTopicMessage = null,
         CancellationToken ct = default)
     {
+        _rl.AddTokens(tokensUsed);
+
         var session = prep.Session!;
 
-        var updatedHistory = new List<ChatMessage>(session.History);
+        // An off-topic turn streams a Blocked event rather than text, so `accumulatedText` is empty;
+        // fall back to the off-topic response so the turn is still persisted and audited (raw JSON +
+        // tokens), matching the non-streaming path.
+        var assistantText = accumulatedText.Length > 0 ? accumulatedText : (offTopicMessage ?? "");
+
+        var newTurnFull = new List<ChatMessage>(2);
+        var newTurnSend = new List<ChatMessage>(2);
         // Skip empty user messages (e.g. the placeholder sent when submitting the contact form)
         if (!string.IsNullOrWhiteSpace(prep.UserMessage))
-            updatedHistory.Add(new ChatMessage(ChatRole.User, prep.UserMessage!));
-        if (accumulatedText.Length > 0)
-            updatedHistory.Add(new ChatMessage(ChatRole.Assistant, accumulatedText));
+        {
+            var userTurn = new ChatMessage(ChatRole.User, prep.UserMessage!);
+            newTurnFull.Add(userTurn);
+            newTurnSend.Add(userTurn);
+        }
+        if (assistantText.Length > 0)
+        {
+            newTurnFull.Add(new ChatMessage(ChatRole.Assistant, assistantText));
+            // Send-history carries the JSON envelope (falling back to the text if unavailable).
+            newTurnSend.Add(new ChatMessage(ChatRole.Assistant, rawResponse ?? assistantText));
+        }
+
+        var (updatedFull, updatedSend) = await AppendAndCompressAsync(session, newTurnFull, newTurnSend, ct);
 
         ConversationSession updatedSession;
         if (confirmedTicketId is not null)
         {
             updatedSession = session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 EscalationPending = false,
                 EscalationTriggerMessage = null,
                 ConsecutiveNoControlWordCount = 0,
@@ -174,7 +268,8 @@ internal sealed class BotWireChatService
         {
             updatedSession = session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 EscalationPending = true,
                 EscalationTriggerMessage = session.EscalationTriggerMessage ?? prep.UserMessage,
                 ConsecutiveNoControlWordCount = 0,
@@ -184,12 +279,25 @@ internal sealed class BotWireChatService
         {
             updatedSession = session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 ConsecutiveNoControlWordCount = failedOpen ? session.ConsecutiveNoControlWordCount + 1 : 0,
             };
         }
 
-        return _sessions.SaveAsync(prep.Token!, updatedSession, ct);
+        await _sessions.SaveAsync(prep.Token!, updatedSession, ct);
+
+        var sessionId = prep.Token!;
+        if (assistantText.Length > 0)
+            await _audit.LogAsync(AuditEvents.AssistantMessage(sessionId, assistantText, rawResponse, tokens: tokensUsed), ct);
+
+        // When the turn produced no assistant message (escalation paths), the tokens have nowhere
+        // else to land — record them on the Escalated event so usage is never silently dropped.
+        int? escalationTokens = assistantText.Length > 0 ? null : tokensUsed;
+        if (confirmedTicketId is not null)
+            await _audit.LogAsync(AuditEvents.Escalated(sessionId, "NEED_HUMAN", confirmedTicketId, escalationTokens), ct);
+        else if (escalationStarted)
+            await _audit.LogAsync(AuditEvents.Escalated(sessionId, "NEED_HUMAN", null, escalationTokens), ct);
     }
 
     /// <summary>
@@ -201,7 +309,17 @@ internal sealed class BotWireChatService
         InitSessionRequest req, string clientIp, CancellationToken ct = default)
     {
         if (!_rateLimiter.IsAllowed(clientIp))
+        {
+            await _audit.LogAsync(AuditEvents.RateLimited("", "MaxRequestsPerIpPerMinute"), ct);
             return (new ChatResult("Blocked", "Too many requests.", "", null, 429), "", false);
+        }
+
+        // Per-IP hourly cap on NEW sessions (design 008 dimension 4): reject over the cap.
+        if (!_rl.TryRegisterIpSession(clientIp))
+        {
+            await _audit.LogAsync(AuditEvents.RateLimited("", "MaxSessionsPerIpPerHour"), ct);
+            return (new ChatResult("Blocked", _rlOptions.IpSessionCapMessage, "", null, 429), "", false);
+        }
 
         var name     = string.IsNullOrWhiteSpace(req.Name)     ? null : req.Name.Trim();
         var username = string.IsNullOrWhiteSpace(req.Username) ? null : req.Username.Trim();
@@ -212,13 +330,68 @@ internal sealed class BotWireChatService
             knownUser = new ContactInfo(email, null, name, username);
 
         var token   = _tokens.GenerateToken();
-        var session = new ConversationSession([], DateTimeOffset.UtcNow, KnownUser: knownUser);
+        var session = new ConversationSession([], [], DateTimeOffset.UtcNow, KnownUser: knownUser);
         await _sessions.SaveAsync(token, session, ct);
 
         return (null, token, NeedsName: name is null);
     }
 
     // ── Private helpers ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Checks the two rate-limit dimensions that short-circuit a turn with a user-facing message:
+    /// the per-session message cap and the daily token budget. Returns a <see cref="ChatResult"/>
+    /// (HTTP 200, carrying the configured message) when one trips, or <see langword="null"/> to proceed.
+    /// </summary>
+    private async Task<ChatResult?> CheckRateCapsAsync(string token, ConversationSession session, CancellationToken ct)
+    {
+        if (_rl.IsSessionOverMessageCap(CountUserMessages(session)))
+        {
+            await _audit.LogAsync(AuditEvents.RateLimited(token, "MaxMessagesPerSession"), ct);
+            return new ChatResult("RateLimited", _rlOptions.SessionMessageCapMessage, token, null);
+        }
+
+        if (_rl.IsTokenBudgetExhausted())
+        {
+            await _audit.LogAsync(AuditEvents.RateLimited(token, "DailyTokenBudget"), ct);
+            return new ChatResult("RateLimited", _rlOptions.TokenBudgetMessage, token, null);
+        }
+
+        return null;
+    }
+
+    private static int CountUserMessages(ConversationSession session)
+    {
+        var count = 0;
+        foreach (var m in session.FullHistory)
+            if (m.Role == ChatRole.User) count++;
+        return count;
+    }
+
+    /// <summary>
+    /// Appends a completed turn to both histories, then runs summary compression on the
+    /// send-history. <see cref="ConversationSession.FullHistory"/> is never compressed —
+    /// ticket generation depends on the complete record.
+    /// <para>
+    /// The send-history assistant turn carries the raw JSON envelope the model emitted, not the
+    /// plain display text. The model imitates its own prior turns, so a plain-text assistant
+    /// history teaches it to drop the required JSON format on later turns (it starts replying with
+    /// bare text or whitespace). Feeding the envelope back keeps every turn consistent with the
+    /// mandated output format. The full-history turn keeps the readable text for ticket generation.
+    /// </para>
+    /// </summary>
+    private async Task<(List<ChatMessage> Full, List<ChatMessage> Send)> AppendAndCompressAsync(
+        ConversationSession session, List<ChatMessage> newTurnFull, List<ChatMessage> newTurnSend, CancellationToken ct)
+    {
+        var updatedFull = new List<ChatMessage>(session.FullHistory);
+        updatedFull.AddRange(newTurnFull);
+
+        var updatedSend = new List<ChatMessage>(session.SendHistory);
+        updatedSend.AddRange(newTurnSend);
+        updatedSend = await _compressor.CompressAsync(updatedSend, _options.Value.SummaryInterval, ct);
+
+        return (updatedFull, updatedSend);
+    }
 
     /// <summary>
     /// Builds the <see cref="ContactInfo"/> passed to <see cref="IAnswerProvider"/>.
@@ -246,22 +419,36 @@ internal sealed class BotWireChatService
             session.KnownUser?.Username);
     }
 
-    private ChatResult? CheckGuards(string message, string? sessionToken, string clientIp)
+    private async Task<ChatResult?> CheckGuardsAsync(
+        string message, string? sessionToken, string clientIp, CancellationToken ct)
     {
         var opts = _options.Value;
+        var sessionId = sessionToken ?? "";
 
         if (message.Length > opts.MaxMessageLength)
-            return new ChatResult("Blocked", "Message too long.", sessionToken ?? "", null, 400);
+        {
+            await _audit.LogAsync(AuditEvents.GuardBlocked(sessionId, "MaxMessageLength"), ct);
+            return new ChatResult("Blocked", "Message too long.", sessionId, null, 400);
+        }
 
         if (!_rateLimiter.IsAllowed(clientIp))
-            return new ChatResult("Blocked", "Too many requests.", sessionToken ?? "", null, 429);
+        {
+            await _audit.LogAsync(AuditEvents.RateLimited(sessionId, "MaxRequestsPerIpPerMinute"), ct);
+            return new ChatResult("Blocked", "Too many requests.", sessionId, null, 429);
+        }
 
         var pii = _piiGuard.Check(message);
         if (pii.Blocked)
-            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionToken ?? "", null, 400);
+        {
+            await _audit.LogAsync(AuditEvents.GuardBlocked(sessionId, "pii"), ct);
+            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionId, null, 400);
+        }
 
         if (_injectionGuard.IsInjectionAttempt(message))
-            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionToken ?? "", null, 400);
+        {
+            await _audit.LogAsync(AuditEvents.GuardBlocked(sessionId, "prompt_injection"), ct);
+            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionId, null, 400);
+        }
 
         return null;
     }
@@ -272,7 +459,7 @@ internal sealed class BotWireChatService
         if (sessionToken is null)
         {
             var token   = _tokens.GenerateToken();
-            var session = new ConversationSession([], DateTimeOffset.UtcNow);
+            var session = new ConversationSession([], [], DateTimeOffset.UtcNow);
             await _sessions.SaveAsync(token, session, ct);
             return (token, session);
         }
@@ -284,32 +471,40 @@ internal sealed class BotWireChatService
     private async Task SaveAnswerAsync(
         string token, ConversationSession session, string message, AnswerResult result, CancellationToken ct)
     {
-        var updatedHistory = new List<ChatMessage>(session.History)
-        {
-            new(ChatRole.User, message),
-        };
+        var userTurn = new ChatMessage(ChatRole.User, message);
+        var newTurnFull = new List<ChatMessage>(2) { userTurn };
+        var newTurnSend = new List<ChatMessage>(2) { userTurn };
         if (result.Status != AnswerStatus.TicketCreated)
-            updatedHistory.Add(new ChatMessage(ChatRole.Assistant, result.Message));
+        {
+            newTurnFull.Add(new ChatMessage(ChatRole.Assistant, result.Message));
+            // Send-history carries the JSON envelope (falling back to the text if unavailable).
+            newTurnSend.Add(new ChatMessage(ChatRole.Assistant, result.RawResponse ?? result.Message));
+        }
+
+        var (updatedFull, updatedSend) = await AppendAndCompressAsync(session, newTurnFull, newTurnSend, ct);
 
         var updatedSession = result.Status switch
         {
             AnswerStatus.NeedHuman => session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 EscalationPending = true,
                 EscalationTriggerMessage = session.EscalationTriggerMessage ?? message,
                 ConsecutiveNoControlWordCount = 0,
             },
             AnswerStatus.TicketCreated => session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 EscalationPending = false,
                 EscalationTriggerMessage = null,
                 ConsecutiveNoControlWordCount = 0,
             },
             _ => session with
             {
-                History = updatedHistory,
+                FullHistory = updatedFull,
+                SendHistory = updatedSend,
                 ConsecutiveNoControlWordCount = result.FailedOpen ? session.ConsecutiveNoControlWordCount + 1 : 0,
             },
         };
