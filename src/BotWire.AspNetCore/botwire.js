@@ -1,10 +1,11 @@
-"use strict";(()=>{var o="botwire_session";function v(s){return s.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}function y(s,h,e){let i=h==="bottom-left"?"left":"right";return`
+"use strict";(()=>{var b="/support",r=class extends Error{constructor(e,i,s){super(i);this.status=e;this.httpStatus=s;this.name="BotWireError"}},o=class{constructor(t={}){this._sessionToken=null;this.endpoint=(t.endpoint??b).replace(/\/+$/,""),this.publicKey=t.publicKey;let e=t.fetch??globalThis.fetch;if(!e)throw new Error("BotWireClient: no global fetch available \u2014 pass config.fetch");this._fetch=e.bind(globalThis)}getSessionToken(){return this._sessionToken}setSessionToken(t){this._sessionToken=t}async initSession(t){let e=await this.post(`${this.endpoint}/session`,{},t);if(!e.ok)throw await this.toError(e);let i=await e.json();return this._sessionToken=i.sessionToken,{sessionToken:i.sessionToken,needsName:i.needsName??!1,errorMessage:i.errorMessage}}async chat(t,e={}){await this.ensureSession(e.signal);let i=await this.post(`${this.endpoint}/chat`,this.body(t,e),e.signal);await this.staleSession(i)&&(await this.initSession(e.signal),i=await this.post(`${this.endpoint}/chat`,this.body(t,e),e.signal));let s;try{s=await i.json()}catch{throw await this.toError(i)}return s.sessionToken&&(this._sessionToken=s.sessionToken),s}async*streamChat(t,e={}){await this.ensureSession(e.signal);let i=await this.post(`${this.endpoint}/chat/stream`,this.body(t,e),e.signal);if(await this.staleSession(i)&&(await this.initSession(e.signal),i=await this.post(`${this.endpoint}/chat/stream`,this.body(t,e),e.signal)),!i.ok||!i.body)throw await this.toError(i);yield*this.parseSse(i.body)}async ensureSession(t){this._sessionToken||await this.initSession(t)}body(t,e){let i={message:t,sessionToken:this._sessionToken};return e.contactEmail&&(i.contactEmail=e.contactEmail),i}async staleSession(t){if(t.status!==400)return!1;try{if((await t.clone().json()).status==="InvalidSession")return this._sessionToken=null,!0}catch{}return!1}async*parseSse(t){let e=t.getReader(),i=new TextDecoder,s="";try{for(;;){let{value:a,done:f}=await e.read();if(f)break;s+=i.decode(a,{stream:!0});let d;for(;(d=s.indexOf(`
+`))!==-1;){let c=s.slice(0,d);if(s=s.slice(d+1),!c.startsWith("data: "))continue;let h=c.slice(6);if(h==="[DONE]"){yield{type:"done"};return}let u=m(h);u&&(yield u)}}}finally{e.releaseLock()}}post(t,e,i){let s={"Content-Type":"application/json"};return this.publicKey&&(s["X-BotWire-Key"]=this.publicKey),this._fetch(t,{method:"POST",headers:s,body:JSON.stringify(e),signal:i})}async toError(t){let e="Error",i=`BotWire request failed (HTTP ${t.status})`;try{let s=await t.clone().json();s.status&&(e=s.status),s.message&&(i=s.message)}catch{}return new r(e,i,t.status)}};function m(n){let t;try{t=JSON.parse(n)}catch{return null}switch(t.type){case"token":return{type:"delta",delta:t.value??""};case"collect_contact":return{type:"collect_contact"};case"escalated":return{type:"escalated",ticketId:t.ticketId??"",message:t.message??""};case"blocked":return{type:"blocked",reason:t.reason??""};default:return null}}var l="botwire_session";function x(n){return n.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}function v(n,t,e){let s=t==="bottom-left"?"left":"right";return`
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
 #bubble{
-  position:fixed;bottom:24px;${i}:24px;
+  position:fixed;bottom:24px;${s}:24px;
   width:56px;height:56px;
-  background:${s};border:none;border-radius:50%;cursor:pointer;
+  background:${n};border:none;border-radius:50%;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
   box-shadow:0 4px 20px rgba(0,0,0,.28);
   transition:transform .2s ease,box-shadow .2s ease;
@@ -14,7 +15,7 @@
 #bubble svg{width:26px;height:26px;fill:#fff;pointer-events:none;flex-shrink:0}
 
 #panel{
-  position:fixed;bottom:96px;${i}:20px;
+  position:fixed;bottom:96px;${s}:20px;
   width:360px;min-height:400px;max-height:560px;
   background:#fff;border-radius:16px;
   box-shadow:0 8px 48px rgba(0,0,0,.18);
@@ -27,7 +28,7 @@
 
 #header{
   display:flex;align-items:center;justify-content:space-between;gap:8px;
-  padding:14px 16px;background:${s};color:#fff;flex-shrink:0;
+  padding:14px 16px;background:${n};color:#fff;flex-shrink:0;
 }
 #header-title{font-weight:600;font-size:15px}
 #close{
@@ -42,7 +43,7 @@
   scroll-behavior:smooth;
 }
 #messages:empty::before{
-  content:'${v(e)}';
+  content:'${x(e)}';
   color:#94a3b8;font-size:13px;text-align:center;
   margin:auto;padding:32px 16px;
 }
@@ -53,7 +54,7 @@
   animation:msg-in .15s ease-out;
 }
 @keyframes msg-in{from{transform:translateY(5px);opacity:0}to{transform:none;opacity:1}}
-.msg-user{align-self:flex-end;background:${s};color:#fff;border-bottom-right-radius:3px}
+.msg-user{align-self:flex-end;background:${n};color:#fff;border-bottom-right-radius:3px}
 .msg-bot {align-self:flex-start;background:#f1f5f9;color:#1e293b;border-bottom-left-radius:3px}
 .msg-sys {
   align-self:center;background:#fef9c3;color:#854d0e;
@@ -81,9 +82,9 @@
   max-height:100px;overflow-y:auto;line-height:1.5;
   transition:border-color .15s;
 }
-#input:focus{border-color:${s};outline:none}
+#input:focus{border-color:${n};outline:none}
 #send{
-  background:${s};color:#fff;border:none;border-radius:10px;
+  background:${n};color:#fff;border:none;border-radius:10px;
   padding:9px 16px;cursor:pointer;font-size:14px;font-weight:500;
   white-space:nowrap;flex-shrink:0;transition:opacity .15s;
 }
@@ -101,10 +102,10 @@
   padding:9px 12px;font:inherit;font-size:14px;outline:none;
   transition:border-color .15s;
 }
-#email-input:focus{border-color:${s}}
+#email-input:focus{border-color:${n}}
 #contact-buttons{display:flex;gap:8px}
 #contact-submit{
-  flex:1;background:${s};color:#fff;border:none;border-radius:10px;
+  flex:1;background:${n};color:#fff;border:none;border-radius:10px;
   padding:10px;cursor:pointer;font-size:14px;font-weight:500;
   transition:opacity .15s;
 }
@@ -127,11 +128,11 @@
 @media(max-width:480px){
   #panel{bottom:0;left:0;right:0;width:100%;min-height:unset;max-height:100%;
     border-radius:0;border-top-left-radius:16px;border-top-right-radius:16px}
-  #bubble{bottom:16px;${i}:16px}
+  #bubble{bottom:16px;${s}:16px}
 }
-`}var b='<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z"/></svg>',w='<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2zM6 10h12v2H6v-2zm0-4h12v2H6V6zm8 8H6v-2h8v2z"/></svg>',p=class extends HTMLElement{constructor(){super();this.sessionToken=null;this.streaming=!1;this.awaitingEmail=!1;this.ticketCreated=!1;this.errorOccurred=!1;this.errorMessage="Something went wrong. Please try again.";this.shadow=this.attachShadow({mode:"open"})}get endpoint(){return this.dataset.endpoint??"/support"}get widgetTitle(){return this.dataset.title??"Support"}get primary(){return this.dataset.primaryColor??"#6366f1"}get position(){return this.dataset.position??"bottom-right"}get publicKey(){return this.dataset.publicKey}get placeholder(){return this.dataset.placeholder??"Type a message\u2026"}get contactPrompt(){return this.dataset.contactPrompt??"Please leave your email address so our team can follow up with you."}get emailPlaceholder(){return this.dataset.emailPlaceholder??"your@email.com"}get sendLabel(){return this.dataset.sendLabel??"Send"}get submitLabel(){return this.dataset.submitLabel??"Submit"}get cancelLabel(){return this.dataset.cancelLabel??"Cancel"}get cancelMessage(){return this.dataset.cancelMessage??"You have ended this conversation."}get greeting(){return this.dataset.greeting??"How can we help you today?"}connectedCallback(){this.mount(),this.sessionToken=sessionStorage.getItem(o),this.sessionToken||this.initSession()}mount(){this.shadow.innerHTML=`
-<style>${y(this.primary,this.position,this.greeting)}</style>
-<button id="bubble" aria-label="Open support chat" aria-expanded="false">${b}</button>
+`}var g='<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z"/></svg>',y='<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2zM6 10h12v2H6v-2zm0-4h12v2H6V6zm8 8H6v-2h8v2z"/></svg>',p=class extends HTMLElement{constructor(){super();this.streaming=!1;this.awaitingEmail=!1;this.ticketCreated=!1;this.errorOccurred=!1;this.errorMessage="Something went wrong. Please try again.";this.shadow=this.attachShadow({mode:"open"})}get endpoint(){return this.dataset.endpoint??"/support"}get widgetTitle(){return this.dataset.title??"Support"}get primary(){return this.dataset.primaryColor??"#6366f1"}get position(){return this.dataset.position??"bottom-right"}get publicKey(){return this.dataset.publicKey}get placeholder(){return this.dataset.placeholder??"Type a message\u2026"}get contactPrompt(){return this.dataset.contactPrompt??"Please leave your email address so our team can follow up with you."}get emailPlaceholder(){return this.dataset.emailPlaceholder??"your@email.com"}get sendLabel(){return this.dataset.sendLabel??"Send"}get submitLabel(){return this.dataset.submitLabel??"Submit"}get cancelLabel(){return this.dataset.cancelLabel??"Cancel"}get cancelMessage(){return this.dataset.cancelMessage??"You have ended this conversation."}get greeting(){return this.dataset.greeting??"How can we help you today?"}connectedCallback(){this.mount(),this.client=new o({endpoint:this.endpoint,publicKey:this.publicKey}),this.client.setSessionToken(sessionStorage.getItem(l)),this.client.getSessionToken()||this.initSession()}mount(){this.shadow.innerHTML=`
+<style>${v(this.primary,this.position,this.greeting)}</style>
+<button id="bubble" aria-label="Open support chat" aria-expanded="false">${g}</button>
 <div id="panel" hidden role="dialog" aria-label="${this.esc(this.widgetTitle)} support chat">
   <div id="header">
     <span id="header-title">${this.esc(this.widgetTitle)}</span>
@@ -152,5 +153,4 @@
     </div>
   </form>
   <div id="ticket-card" hidden role="status"></div>
-</div>`,this.panel=this.q("#panel"),this.bubble=this.q("#bubble"),this.messages=this.q("#messages"),this.typing=this.q("#typing"),this.inputArea=this.q("#input-area"),this.input=this.q("#input"),this.sendBtn=this.q("#send"),this.contact=this.q("#contact-form"),this.emailIn=this.q("#email-input"),this.cancelBtn=this.q("#contact-cancel"),this.ticket=this.q("#ticket-card"),this.bubble.addEventListener("click",()=>this.toggle()),this.q("#close").addEventListener("click",()=>this.close()),this.sendBtn.addEventListener("click",()=>this.handleSend()),this.input.addEventListener("keydown",e=>{e.key==="Enter"&&!e.shiftKey&&(e.preventDefault(),this.handleSend())}),this.input.addEventListener("input",()=>this.autoResize()),this.contact.addEventListener("submit",e=>{e.preventDefault(),this.handleContactSubmit()}),this.cancelBtn.addEventListener("click",()=>this.handleContactCancel())}async initSession(){try{let e=await this.post(`${this.endpoint}/session`,{});if(e.ok){let t=await e.json();this.sessionToken=t.sessionToken,sessionStorage.setItem(o,t.sessionToken),t.errorMessage&&(this.errorMessage=t.errorMessage)}}catch{}}toggle(){this.panel.hidden?this.open():this.ticketCreated?(this.resetConversation(),this.input.focus()):this.close()}open(){this.ticketCreated&&this.resetConversation(),this.panel.hidden=!1,this.bubble.innerHTML=w,this.bubble.setAttribute("aria-expanded","true"),this.awaitingEmail?this.emailIn.focus():this.input.focus()}resetConversation(){this.messages.innerHTML="",this.ticketCreated=!1,this.awaitingEmail=!1,this.streaming=!1,this.errorOccurred=!1,this.contact.hidden=!0,this.ticket.hidden=!0,this.inputArea.hidden=!1,this.sendBtn.disabled=!1,this.emailIn.value="",this.sessionToken=null,sessionStorage.removeItem(o),this.initSession()}close(){this.errorOccurred&&this.resetConversation(),this.panel.hidden=!0,this.bubble.innerHTML=b,this.bubble.setAttribute("aria-expanded","false")}handleSend(){if(this.streaming||this.awaitingEmail)return;let e=this.input.value.trim();e&&(this.input.value="",this.autoResize(),this.appendMessage("user",e),this.stream(e))}handleContactSubmit(){let e=this.emailIn.value.trim();e&&(this.contact.hidden=!0,this.awaitingEmail=!1,this.stream("",e))}handleContactCancel(){this.contact.hidden=!0,this.awaitingEmail=!1,this.ticketCreated=!0,this.appendMessage("sys",this.cancelMessage)}async stream(e,t){if(this.streaming)return;this.streaming=!0,this.sendBtn.disabled=!0,this.typing.hidden=!1,this.sessionToken||await this.initSession();let i={message:e,sessionToken:this.sessionToken};t&&(i.contactEmail=t);let d=null;try{let n=await this.openStream(i);if(!n.ok||!n.body){this.typing.hidden=!0,this.errorOccurred=!0,this.appendMessage("sys",this.errorMessage);return}let m=n.body.getReader(),x=new TextDecoder,a="",c=!1;for(;!c;){let u=await m.read();if(u.done)break;a+=x.decode(u.value,{stream:!0});let l;for(;(l=a.indexOf(`
-`))!==-1;){let g=a.slice(0,l);if(a=a.slice(l+1),!g.startsWith("data: "))continue;let f=g.slice(6);if(f==="[DONE]"){c=!0;break}let r;try{r=JSON.parse(f)}catch{continue}switch(this.typing.hidden=!0,r.type){case"token":d||(d=this.appendMessage("bot","")),d.textContent+=r.value,this.scrollBottom();break;case"collect_contact":this.inputArea.hidden=!0,this.contact.hidden=!1,this.awaitingEmail=!0,requestAnimationFrame(()=>{this.scrollBottom(),this.emailIn.focus()});break;case"escalated":this.ticketCreated=!0,this.ticket.hidden=!1,this.ticket.textContent=r.message,this.inputArea.hidden=!0;break;case"blocked":this.appendMessage("sys",r.reason);break}}}}catch(n){this.typing.hidden=!0,n instanceof DOMException&&n.name==="AbortError"||this.appendMessage("sys","Connection error. Please try again.")}finally{this.typing.hidden=!0,this.streaming=!1,!this.awaitingEmail&&!this.ticketCreated&&(this.sendBtn.disabled=!1,this.panel.hidden||this.input.focus())}}async openStream(e){let t=await this.post(`${this.endpoint}/chat/stream`,e);return t.status===400&&await this.isInvalidSession(t)&&(sessionStorage.removeItem(o),this.sessionToken=null,await this.initSession(),this.sessionToken&&(e.sessionToken=this.sessionToken,t=await this.post(`${this.endpoint}/chat/stream`,e))),t}async isInvalidSession(e){try{return(await e.clone().json()).status==="InvalidSession"}catch{return!1}}appendMessage(e,t){let i=document.createElement("div");return i.className=`msg msg-${e}`,i.textContent=t,this.messages.appendChild(i),this.scrollBottom(),i}scrollBottom(){this.messages.scrollTop=this.messages.scrollHeight}autoResize(){this.input.style.height="auto",this.input.style.height=`${Math.min(this.input.scrollHeight,100)}px`}post(e,t){let i={"Content-Type":"application/json"};return this.publicKey&&(i["X-BotWire-Key"]=this.publicKey),fetch(e,{method:"POST",headers:i,body:JSON.stringify(t)})}esc(e){return e.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}q(e){return this.shadow.querySelector(e)}};customElements.define("botwire-widget",p);})();
+</div>`,this.panel=this.q("#panel"),this.bubble=this.q("#bubble"),this.messages=this.q("#messages"),this.typing=this.q("#typing"),this.inputArea=this.q("#input-area"),this.input=this.q("#input"),this.sendBtn=this.q("#send"),this.contact=this.q("#contact-form"),this.emailIn=this.q("#email-input"),this.cancelBtn=this.q("#contact-cancel"),this.ticket=this.q("#ticket-card"),this.bubble.addEventListener("click",()=>this.toggle()),this.q("#close").addEventListener("click",()=>this.close()),this.sendBtn.addEventListener("click",()=>this.handleSend()),this.input.addEventListener("keydown",e=>{e.key==="Enter"&&!e.shiftKey&&(e.preventDefault(),this.handleSend())}),this.input.addEventListener("input",()=>this.autoResize()),this.contact.addEventListener("submit",e=>{e.preventDefault(),this.handleContactSubmit()}),this.cancelBtn.addEventListener("click",()=>this.handleContactCancel())}async initSession(){try{let e=await this.client.initSession();sessionStorage.setItem(l,e.sessionToken),e.errorMessage&&(this.errorMessage=e.errorMessage)}catch{}}toggle(){this.panel.hidden?this.open():this.ticketCreated?(this.resetConversation(),this.input.focus()):this.close()}open(){this.ticketCreated&&this.resetConversation(),this.panel.hidden=!1,this.bubble.innerHTML=y,this.bubble.setAttribute("aria-expanded","true"),this.awaitingEmail?this.emailIn.focus():this.input.focus()}resetConversation(){this.messages.innerHTML="",this.ticketCreated=!1,this.awaitingEmail=!1,this.streaming=!1,this.errorOccurred=!1,this.contact.hidden=!0,this.ticket.hidden=!0,this.inputArea.hidden=!1,this.sendBtn.disabled=!1,this.emailIn.value="",this.client.setSessionToken(null),sessionStorage.removeItem(l),this.initSession()}close(){this.errorOccurred&&this.resetConversation(),this.panel.hidden=!0,this.bubble.innerHTML=g,this.bubble.setAttribute("aria-expanded","false")}handleSend(){if(this.streaming||this.awaitingEmail)return;let e=this.input.value.trim();e&&(this.input.value="",this.autoResize(),this.appendMessage("user",e),this.stream(e))}handleContactSubmit(){let e=this.emailIn.value.trim();e&&(this.contact.hidden=!0,this.awaitingEmail=!1,this.stream("",e))}handleContactCancel(){this.contact.hidden=!0,this.awaitingEmail=!1,this.ticketCreated=!0,this.appendMessage("sys",this.cancelMessage)}async stream(e,i){if(this.streaming)return;this.streaming=!0,this.sendBtn.disabled=!0,this.typing.hidden=!1;let s=null;try{for await(let a of this.client.streamChat(e,{contactEmail:i}))switch(this.typing.hidden=!0,a.type){case"delta":s||(s=this.appendMessage("bot","")),s.textContent+=a.delta,this.scrollBottom();break;case"collect_contact":this.inputArea.hidden=!0,this.contact.hidden=!1,this.awaitingEmail=!0,requestAnimationFrame(()=>{this.scrollBottom(),this.emailIn.focus()});break;case"escalated":this.ticketCreated=!0,this.ticket.hidden=!1,this.ticket.textContent=a.message,this.inputArea.hidden=!0;break;case"blocked":this.appendMessage("sys",a.reason);break;case"done":break}}catch(a){this.typing.hidden=!0,a instanceof DOMException&&a.name==="AbortError"||(a instanceof r?(this.errorOccurred=!0,this.appendMessage("sys",this.errorMessage)):this.appendMessage("sys","Connection error. Please try again."))}finally{let a=this.client.getSessionToken();a&&sessionStorage.setItem(l,a),this.typing.hidden=!0,this.streaming=!1,!this.awaitingEmail&&!this.ticketCreated&&(this.sendBtn.disabled=!1,this.panel.hidden||this.input.focus())}}appendMessage(e,i){let s=document.createElement("div");return s.className=`msg msg-${e}`,s.textContent=i,this.messages.appendChild(s),this.scrollBottom(),s}scrollBottom(){this.messages.scrollTop=this.messages.scrollHeight}autoResize(){this.input.style.height="auto",this.input.style.height=`${Math.min(this.input.scrollHeight,100)}px`}esc(e){return e.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}q(e){return this.shadow.querySelector(e)}};customElements.define("botwire-widget",p);})();

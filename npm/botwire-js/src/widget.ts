@@ -1,13 +1,9 @@
 // BotWire Web Component — zero-dependency chat widget
 // Shadow DOM isolation, SSE streaming via fetch + ReadableStream.
 
-const STORAGE_KEY = 'botwire_session';
+import { BotWireClient, BotWireError } from './client.js';
 
-type SseEvent =
-  | { type: 'token';           value: string }
-  | { type: 'collect_contact'                }
-  | { type: 'escalated';       ticketId: string; message: string }
-  | { type: 'blocked';         reason: string };
+const STORAGE_KEY = 'botwire_session';
 
 // ── CSS ──────────────────────────────────────────────────────────────────────
 
@@ -161,8 +157,8 @@ const ICON_CLOSE_CHAT = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/
 
 class BotWireWidget extends HTMLElement {
   private readonly shadow: ShadowRoot;
+  private client!:       BotWireClient;
 
-  private sessionToken:  string | null = null;
   private streaming      = false;
   private awaitingEmail  = false;
   private ticketCreated  = false;
@@ -207,8 +203,9 @@ class BotWireWidget extends HTMLElement {
 
   connectedCallback(): void {
     this.mount();
-    this.sessionToken = sessionStorage.getItem(STORAGE_KEY);
-    if (!this.sessionToken) void this.initSession();
+    this.client = new BotWireClient({ endpoint: this.endpoint, publicKey: this.publicKey });
+    this.client.setSessionToken(sessionStorage.getItem(STORAGE_KEY));
+    if (!this.client.getSessionToken()) void this.initSession();
   }
 
   // ── Mount ───────────────────────────────────────────────────────────────────
@@ -269,13 +266,9 @@ class BotWireWidget extends HTMLElement {
 
   private async initSession(): Promise<void> {
     try {
-      const resp = await this.post(`${this.endpoint}/session`, {});
-      if (resp.ok) {
-        const data = await resp.json() as { sessionToken: string; errorMessage?: string };
-        this.sessionToken = data.sessionToken;
-        sessionStorage.setItem(STORAGE_KEY, data.sessionToken);
-        if (data.errorMessage) this.errorMessage = data.errorMessage;
-      }
+      const result = await this.client.initSession();
+      sessionStorage.setItem(STORAGE_KEY, result.sessionToken);
+      if (result.errorMessage) this.errorMessage = result.errorMessage;
     } catch {
       // Will retry on first send
     }
@@ -314,7 +307,7 @@ class BotWireWidget extends HTMLElement {
     this.inputArea.hidden = false;
     this.sendBtn.disabled = false;
     this.emailIn.value   = '';
-    this.sessionToken    = null;
+    this.client.setSessionToken(null);
     sessionStorage.removeItem(STORAGE_KEY);
     void this.initSession();
   }
@@ -359,114 +352,62 @@ class BotWireWidget extends HTMLElement {
     this.sendBtn.disabled = true;
     this.typing.hidden = false;
 
-    if (!this.sessionToken) await this.initSession();
-
-    const body: Record<string, unknown> = { message, sessionToken: this.sessionToken };
-    if (contactEmail) body['contactEmail'] = contactEmail;
-
     let botEl: HTMLElement | null = null;
 
     try {
-      const resp = await this.openStream(body);
-
-      if (!resp.ok || !resp.body) {
+      for await (const evt of this.client.streamChat(message, { contactEmail })) {
         this.typing.hidden = true;
-        this.errorOccurred = true;
-        this.appendMessage('sys', this.errorMessage);
-        return;
-      }
 
-      const reader  = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      let done = false;
+        switch (evt.type) {
+          case 'delta':
+            if (!botEl) botEl = this.appendMessage('bot', '');
+            botEl.textContent += evt.delta;
+            this.scrollBottom();
+            break;
 
-      while (!done) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buf += decoder.decode(chunk.value, { stream: true });
+          case 'collect_contact':
+            this.inputArea.hidden = true;
+            this.contact.hidden   = false;
+            this.awaitingEmail    = true;
+            // rAF: wait for layout reflow so messages area has shrunk before scrolling
+            requestAnimationFrame(() => { this.scrollBottom(); this.emailIn.focus(); });
+            break;
 
-        let nl: number;
-        while ((nl = buf.indexOf('\n')) !== -1) {
-          const line = buf.slice(0, nl);
-          buf = buf.slice(nl + 1);
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
+          case 'escalated':
+            this.ticketCreated      = true;
+            this.ticket.hidden      = false;
+            this.ticket.textContent = evt.message;
+            this.inputArea.hidden   = true;
+            break;
 
-          if (data === '[DONE]') { done = true; break; }
+          case 'blocked':
+            this.appendMessage('sys', evt.reason);
+            break;
 
-          let evt: SseEvent;
-          try { evt = JSON.parse(data) as SseEvent; } catch { continue; }
-
-          this.typing.hidden = true;
-
-          switch (evt.type) {
-            case 'token':
-              if (!botEl) botEl = this.appendMessage('bot', '');
-              botEl.textContent += evt.value;
-              this.scrollBottom();
-              break;
-
-            case 'collect_contact':
-              this.inputArea.hidden = true;
-              this.contact.hidden   = false;
-              this.awaitingEmail    = true;
-              // rAF: wait for layout reflow so messages area has shrunk before scrolling
-              requestAnimationFrame(() => { this.scrollBottom(); this.emailIn.focus(); });
-              break;
-
-            case 'escalated':
-              this.ticketCreated      = true;
-              this.ticket.hidden      = false;
-              this.ticket.textContent = evt.message;
-              this.inputArea.hidden   = true;
-              break;
-
-            case 'blocked':
-              this.appendMessage('sys', evt.reason);
-              break;
-          }
+          case 'done':
+            break;
         }
       }
     } catch (err) {
       this.typing.hidden = true;
-      if (!(err instanceof DOMException && err.name === 'AbortError'))
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // user navigated away / aborted — stay silent
+      } else if (err instanceof BotWireError) {
+        // server rejected the turn — surface the host-configured message
+        this.errorOccurred = true;
+        this.appendMessage('sys', this.errorMessage);
+      } else {
         this.appendMessage('sys', 'Connection error. Please try again.');
+      }
     } finally {
+      const token = this.client.getSessionToken();
+      if (token) sessionStorage.setItem(STORAGE_KEY, token);
       this.typing.hidden    = true;
       this.streaming        = false;
       if (!this.awaitingEmail && !this.ticketCreated) {
         this.sendBtn.disabled = false;
         if (!this.panel.hidden) this.input.focus();
       }
-    }
-  }
-
-  // Opens the chat stream, self-healing a stale session token once: when the
-  // server rejects the token (400 + status "InvalidSession" — e.g. after an app
-  // pool restart cleared the in-memory store), drop the local token, create a
-  // fresh session, and resend the same message. At most one retry.
-  private async openStream(body: Record<string, unknown>): Promise<Response> {
-    let resp = await this.post(`${this.endpoint}/chat/stream`, body);
-
-    if (resp.status === 400 && await this.isInvalidSession(resp)) {
-      sessionStorage.removeItem(STORAGE_KEY);
-      this.sessionToken = null;
-      await this.initSession();
-      if (this.sessionToken) {
-        body['sessionToken'] = this.sessionToken;
-        resp = await this.post(`${this.endpoint}/chat/stream`, body);
-      }
-    }
-    return resp;
-  }
-
-  private async isInvalidSession(resp: Response): Promise<boolean> {
-    try {
-      const data = await resp.clone().json() as { status?: string };
-      return data.status === 'InvalidSession';
-    } catch {
-      return false;
     }
   }
 
@@ -488,12 +429,6 @@ class BotWireWidget extends HTMLElement {
   private autoResize(): void {
     this.input.style.height = 'auto';
     this.input.style.height = `${Math.min(this.input.scrollHeight, 100)}px`;
-  }
-
-  private post(url: string, body: Record<string, unknown>): Promise<Response> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.publicKey) headers['X-BotWire-Key'] = this.publicKey;
-    return fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
   }
 
   private esc(s: string): string {

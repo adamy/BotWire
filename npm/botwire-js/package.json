@@ -1,12 +1,36 @@
 {
   "name": "botwire-js",
-  "version": "1.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Framework-agnostic JS/TS client for the BotWire support API — chat, SSE streaming, and session management with zero DOM dependencies.",
+  "license": "AGPL-3.0-or-later",
+  "author": "Object IT Limited",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adamy/BotWire.git",
+    "directory": "npm/botwire-js"
+  },
+  "keywords": ["botwire", "support", "chatbot", "sse", "streaming", "customer-support"],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/widget.ts --bundle --minify --outfile=dist/botwire.js",
+    "build:sdk": "esbuild src/index.ts --bundle --format=esm --outfile=dist/index.js && esbuild src/index.ts --bundle --format=cjs --outfile=dist/index.cjs && tsc -p tsconfig.build.json",
+    "build:widget": "tsc --noEmit && esbuild src/widget.ts --bundle --minify --outfile=dist/botwire.js",
     "build:fast": "esbuild src/widget.ts --bundle --minify --outfile=dist/botwire.js",
+    "build": "npm run build:sdk && npm run build:widget",
     "size": "esbuild src/widget.ts --bundle --minify | gzip -c | wc -c",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build:sdk"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
