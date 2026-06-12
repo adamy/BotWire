@@ -5,17 +5,17 @@
     <Authors>Object IT Limited</Authors>
     <Company>Object IT Limited</Company>
     <Description>Add a 24/7 AI customer-support bot to your ASP.NET Core site with AddBotWire() + MapBotWire(). Embedded zero-dependency chat widget, SSE streaming, escalation and ticket creation. Bring your own OpenAI-compatible API key — no SaaS fees. Commercial licenses available for proprietary use.</Description>
-    <PackageTags>botwire;chatbot;customer-support;aspnetcore;middleware</PackageTags>
+    <PackageTags>botwire;ai;chatbot;customer-support;aspnetcore;chat-widget;rag;openai;llm;gpt;sse;self-hosted;support-bot;helpdesk</PackageTags>
     <PackageProjectUrl>https://github.com/adamy/BotWire</PackageProjectUrl>
     <RepositoryUrl>https://github.com/adamy/BotWire</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>NUGET.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\NUGET.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <!-- Microsoft.Extensions.* 10.x packages predate net6.0 support; suppress their TFM warnings

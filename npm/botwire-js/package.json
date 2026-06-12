@@ -1,6 +1,6 @@
 {
   "name": "botwire-js",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic JS/TS client for the BotWire support API — chat, SSE streaming, and session management with zero DOM dependencies.",
   "license": "AGPL-3.0-or-later",
   "author": "Object IT Limited",
