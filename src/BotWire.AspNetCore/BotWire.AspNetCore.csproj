@@ -38,14 +38,21 @@
   </ItemGroup>
 
   <!--
-    Rebuild the widget bundle whenever widget.ts changes.
+    Rebuild the widget bundle whenever any widget/SDK source changes.
     Conditioned on net10.0 so it runs exactly once in a multi-targeted build.
-    Inputs/Outputs enables incremental build — skipped when widget.ts is older than botwire.js.
+    Inputs/Outputs enables incremental build — the bundle is rebuilt when any source under
+    npm/botwire-js/src is newer than botwire.js. widget.ts imports the SDK (client/types), so all
+    of src must be tracked, not just widget.ts, or an SDK edit would ship a stale embedded widget.
+    BeforeTargets includes CoreCompile so the refreshed botwire.js is embedded in the same build
+    (BeforeTargets="Build" alone can leave the assembly's embedded resource one build behind).
   -->
+  <ItemGroup>
+    <BotWireWidgetSource Include="$(MSBuildThisFileDirectory)..\..\npm\botwire-js\src\**\*.ts" />
+  </ItemGroup>
   <Target Name="BuildBotWireWidget"
-          BeforeTargets="Build"
+          BeforeTargets="Build;CoreCompile"
           Condition="'$(TargetFramework)' == 'net10.0'"
-          Inputs="$(MSBuildThisFileDirectory)..\..\npm\botwire-js\src\widget.ts"
+          Inputs="@(BotWireWidgetSource)"
           Outputs="$(MSBuildThisFileDirectory)botwire.js">
     <Message Text="BotWire: building widget..." Importance="high" />
     <Exec Command="npm install"
