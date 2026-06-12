@@ -108,5 +108,13 @@ jobs:
 
       # No token: authenticates via OIDC against the trusted publisher configured
       # for botwire-js on npmjs.com. Provenance is attached automatically.
+      # Idempotent: npm has no --skip-duplicate, so skip if the version already
+      # exists (e.g. a manually bootstrapped first publish) to keep re-runs green.
       - name: Publish to npm (Trusted Publishing, OIDC)
-        run: npm publish --access public
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "botwire-js@$VERSION" version >/dev/null 2>&1; then
+            echo "botwire-js@$VERSION already published; skipping."
+          else
+            npm publish --access public
+          fi
