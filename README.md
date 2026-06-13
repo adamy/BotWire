@@ -1,10 +1,13 @@
 # BotWire
 
+[![NuGet](https://img.shields.io/nuget/v/BotWire.AspNetCore.svg?logo=nuget&label=NuGet)](https://www.nuget.org/packages/BotWire.AspNetCore)
+[![Downloads](https://img.shields.io/nuget/dt/BotWire.AspNetCore.svg)](https://www.nuget.org/packages/BotWire.AspNetCore)
+[![npm](https://img.shields.io/npm/v/botwire-js.svg?logo=npm&label=botwire-js)](https://www.npmjs.com/package/botwire-js)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+
 **Low-cost AI customer-support for your .NET website.** Drop one NuGet package into your ASP.NET Core app, point it at your FAQ, and ship a 24/7 support assistant that answers customers instantly — and quietly opens a support ticket the moment a human is actually needed.
 
 No SaaS seat fees. No per-conversation pricing. You bring your own OpenAI-compatible API key, so your only running cost is the model tokens — pennies per conversation with `gpt-4o-mini` or DeepSeek.
-
-![BotWire chat widget on a demo store](docs/images/01-landing.png)
 
 ## Why BotWire
 
@@ -15,20 +18,6 @@ No SaaS seat fees. No per-conversation pricing. You bring your own OpenAI-compat
 - **Multilingual out of the box.** Replies in whatever language the customer writes in; you choose the language your team reads tickets in.
 - **Zero-dependency widget.** A ~12KB Web Component (Shadow DOM, no framework) you embed with a single `<script>` tag.
 - **Self-hostable & open.** AGPL-3.0. Your data and prompts stay in your app. Commercial licenses available if AGPL doesn't fit.
-
-## How it works
-
-**1. The customer asks — BotWire answers from your FAQ, streaming token-by-token.**
-
-![Bot answering a return-policy question](docs/images/02-answer.png)
-
-**2. When the question needs a human, it collects contact details instead of guessing.**
-
-![Bot collecting customer email for escalation](docs/images/03-collect-contact.png)
-
-**3. A support ticket is created and emailed to your team — the customer gets a confirmation.**
-
-![Support ticket confirmation in the widget](docs/images/04-ticket.png)
 
 ## Quick start
 
@@ -72,6 +61,61 @@ Embed the widget on any page:
 ```
 
 That's it — the bot answers from `docs/faq.md` and raises tickets when it can't.
+
+## See it in action
+
+![BotWire chat widget on a demo store](docs/images/01-landing.png)
+
+**1. The customer asks — BotWire answers from your FAQ, streaming token-by-token.**
+
+![Bot answering a return-policy question](docs/images/02-answer.png)
+
+**2. When the question needs a human, it collects contact details instead of guessing.**
+
+![Bot collecting customer email for escalation](docs/images/03-collect-contact.png)
+
+**3. A support ticket is created and emailed to your team — the customer gets a confirmation.**
+
+![Support ticket confirmation in the widget](docs/images/04-ticket.png)
+
+## Build your own frontend
+
+The embedded `<botwire-widget>` is optional. Prefer your own chat UI — a React/Vue/Svelte component, a custom layout, or a native app? Use the framework-agnostic [`botwire-js`](https://www.npmjs.com/package/botwire-js) SDK (zero DOM dependencies). It wraps session creation, chat, and SSE streaming against the same `MapBotWire()` endpoints — the bundled widget is itself built on top of it, so anything the widget does, your UI can too.
+
+```bash
+npm install botwire-js
+```
+
+```ts
+import { BotWireClient } from 'botwire-js';
+
+const client = new BotWireClient({ endpoint: '/support' });
+
+for await (const e of client.streamChat('How do refunds work?')) {
+  switch (e.type) {
+    case 'delta':           appendToBubble(e.delta); break;  // streamed answer tokens
+    case 'collect_contact': showContactForm();       break;  // resend with { contactEmail }
+    case 'escalated':       showTicketCreated(e);    break;
+    case 'done':            finalizeBubble();         break;
+  }
+}
+```
+
+## When to use BotWire
+
+Reach for BotWire when you want to:
+
+- Add a self-hosted AI support bot to an **ASP.NET Core** site — no SaaS subscription, no per-conversation fees.
+- Answer customers strictly from **your own FAQ / Markdown docs**, grounded — no invented policies, prices, or promises.
+- **Hand off to a human** automatically (contact capture + ticket email) the moment the bot can't help.
+- Keep your data, prompts, and API key **inside your own application**.
+
+## What BotWire is *not*
+
+- **Not a general-purpose AI agent framework.** There's no tool-calling runtime, workflow orchestration, or `Agent.Run()` — BotWire is a focused customer-support bot. (For agent toolkits, look at Semantic Kernel.)
+- **Not a thin OpenAI SDK wrapper.** It ships the whole support pipeline: RAG over your docs, a streaming widget, PII/injection guards, rate limiting, escalation, and tickets.
+- **Not a chat-UI component library.** It's a backend plus one embeddable widget — not a design system.
+- **Not a hosted SaaS.** You self-host and bring your own OpenAI-compatible key.
 
 ## Configuration reference
 
@@ -365,5 +409,8 @@ meet your obligations.
 
 ## License
 
-BotWire is available under the [AGPL v3](LICENSE).
-Commercial licenses are available for proprietary use — see [COMMERCIAL.md](COMMERCIAL.md).
+BotWire is open source under the [AGPL v3](LICENSE) — free to self-host, with the usual AGPL copyleft obligations.
+
+### Commercial license
+
+If AGPL doesn't fit (e.g. you ship BotWire inside a closed-source product), a commercial license is available. Click **[Get a License](https://www.objectit.co.nz/botwire)** at objectit.co.nz/botwire to start the conversation — see [COMMERCIAL.md](COMMERCIAL.md) for an overview.

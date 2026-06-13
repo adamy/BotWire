@@ -20,7 +20,7 @@ Specific terms (scope, pricing, support, updates) are agreed per customer. This 
 
 ## How to get in touch
 
-Open a [GitHub Discussion](https://github.com/adamy/BotWire/discussions) with the label **commercial-license** and include:
+Go to **[objectit.co.nz/botwire](https://www.objectit.co.nz/botwire)** and click **"Get a License"** to start a commercial-licensing conversation with Object IT Limited. Please include:
 
 - Your company name and contact email
 - How you plan to use BotWire (internal tool, SaaS, embedded in a product, etc.)
@@ -28,4 +28,6 @@ Open a [GitHub Discussion](https://github.com/adamy/BotWire/discussions) with th
 
 We will respond with next steps for licensing terms and pricing.
 
-For general technical questions unrelated to licensing, use Discussions without the commercial-license label or open an issue on the repository.
+Prefer GitHub? You can instead open a [GitHub Discussion](https://github.com/adamy/BotWire/discussions) with the label **commercial-license**.
+
+For general technical questions unrelated to licensing, use Discussions or open an issue on the repository.
