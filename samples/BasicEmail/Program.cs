@@ -30,6 +30,7 @@ var baseUrl = Environment.GetEnvironmentVariable("BOTWIRE_TEST_BASE_URL");
 
 builder.Services.AddBotWire(opts =>
 {
+    // opts.LicenseKey = "XXXX-XXXX-XXXX-XXXX"; // Commercial license key (required for closed-source use)
     opts.TopicDescription = "Customer support for Acme Store";
     opts.Documents        = [Path.Combine(AppContext.BaseDirectory, "docs", "faq.md")];
     opts.ChatProvider     = new OpenAIProviderOptions

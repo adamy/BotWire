@@ -24,6 +24,15 @@ namespace BotWire.AspNetCore;
 /// <summary>Top-level configuration for the BotWire support bot.</summary>
 public sealed class BotWireOptions
 {
+    /// <summary>
+    /// Commercial license key issued by Lemon Squeezy at purchase.
+    /// Required for closed-source / proprietary use under the commercial license;
+    /// not required for AGPL-compliant open-source use.
+    /// License validation is not enforced in this release and is planned for a
+    /// future version.
+    /// </summary>
+    public string? LicenseKey { get; set; }
+
     /// <summary>Short description of the support topic, injected into the system prompt.</summary>
     [Required]
     public string TopicDescription { get; set; } = "";

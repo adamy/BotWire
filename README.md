@@ -121,6 +121,7 @@ Reach for BotWire when you want to:
 
 | Property | Default | Description |
 |---|---|---|
+| `LicenseKey` | `null` | Commercial license key from Lemon Squeezy. Required for closed-source use under the commercial license; not needed for AGPL-compliant deployments. Validation is not enforced in this release. |
 | `TopicDescription` | *(required)* | Short phrase describing your support scope, injected into the system prompt. Also enables the off-topic guard. |
 | `Documents` | `[]` | Paths to Markdown knowledge-base files. |
 | `ChatProvider` | *(required)* | LLM provider — `ApiKey`, `Model`, optional `BaseUrl` for OpenAI-compatible APIs (e.g. DeepSeek), optional `Temperature`. |
@@ -413,4 +414,9 @@ BotWire is open source under the [AGPL v3](LICENSE) — free to self-host, with 
 
 ### Commercial license
 
-If AGPL doesn't fit (e.g. you ship BotWire inside a closed-source product), a commercial license is available. Click **[Get a License](https://www.objectit.co.nz/botwire)** at objectit.co.nz/botwire to start the conversation — see [COMMERCIAL.md](COMMERCIAL.md) for an overview.
+Shipping BotWire inside a closed-source product? You don't have to deal with AGPL compliance — just buy an affordable commercial license and use it in proprietary code.
+
+- **$599/year** for an annual license (includes updates while active), or **$1,499 one-time** for a perpetual buy-out covering current and future versions.
+- Self-serve checkout via Lemon Squeezy; your license key is delivered automatically. Licenses are **usage-only** — priority support is a separate paid add-on, not included.
+
+See [COMMERCIAL.md](COMMERCIAL.md) for full details, the support boundary, and checkout links.
