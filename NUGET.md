@@ -40,6 +40,7 @@ Embed the zero-dependency widget on any page:
 | **BotWire.AspNetCore** | The full stack — start here. Endpoints, widget, guards, DI. |
 | **BotWire.Core** | The engine alone (RAG, escalation, guards) with no ASP.NET dependency. |
 | **BotWire.Channels.Email** | SMTP delivery of escalated tickets (MailKit). |
+| **BotWire.Redis** | Redis-backed sessions + distributed rate limiting for multi-container deployments. |
 
 ## License
 
