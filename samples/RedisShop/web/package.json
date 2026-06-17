@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "botwire-js": "^0.2.0",
+    "botwire-js": "^0.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
