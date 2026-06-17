@@ -200,6 +200,73 @@ public class RateLimiterTests
         Assert.Equal(0, limiter.TokensUsedToday);
     }
 
+    // ── Distributed counter store (Redis path) ──────────────────────────────────
+
+    [Fact]
+    public async Task PerMinute_DistributedStore_WithinQuota_NoWaitAndIncrements()
+    {
+        var store = new FakeRateLimitStore();
+        using var limiter = new RateLimiter(
+            Options.Create(new RateLimitOptions { MaxMessagesPerMinute = 3 }), store);
+
+        var delay = await limiter.DelayForPerMinuteAsync("s1");
+
+        Assert.Equal(TimeSpan.Zero, delay);
+        Assert.Equal(1, store.Counts["botwire:rl:msgmin:s1"]); // slot consumed
+    }
+
+    [Fact]
+    public async Task PerMinute_DistributedStore_OverQuota_WaitsUntilWindowFreesThenAdmits()
+    {
+        var store = new FakeRateLimitStore();
+        store.Counts["botwire:rl:msgmin:s1"] = 5; // window full (cap 5)
+        using var limiter = new RateLimiter(
+            Options.Create(new RateLimitOptions { MaxMessagesPerMinute = 5 }), store);
+
+        // The store reports full on the first read, then the window "rolls" (TTL expiry → 0)
+        // before the next poll, so the call waits ~1 step then consumes a fresh slot.
+        store.OnGet = key => { store.Counts[key] = 0; };
+
+        var delay = await limiter.DelayForPerMinuteAsync("s1");
+
+        Assert.True(delay >= TimeSpan.FromSeconds(1));
+        Assert.Equal(1, store.Counts["botwire:rl:msgmin:s1"]); // admitted after the window freed
+    }
+
+    [Fact]
+    public async Task TokenBudget_DistributedStore_ExhaustsFromSharedCounter()
+    {
+        var store = new FakeRateLimitStore();
+        var clock = new FakeClock(new DateTimeOffset(2026, 6, 17, 10, 0, 0, TimeSpan.Zero));
+        using var limiter = new RateLimiter(
+            Options.Create(new RateLimitOptions { DailyTokenBudget = 100 }), clock.Now, store);
+
+        Assert.False(await limiter.IsTokenBudgetExhaustedAsync());
+        await limiter.AddTokensAsync(100);
+        Assert.True(await limiter.IsTokenBudgetExhaustedAsync());
+    }
+
+    private sealed class FakeRateLimitStore : IRateLimitStore
+    {
+        public readonly Dictionary<string, long> Counts = new();
+        public Action<string>? OnGet;
+
+        public Task<long> IncrementAsync(string key, long amount, TimeSpan expiry, CancellationToken ct = default)
+        {
+            Counts.TryGetValue(key, out var current);
+            current += amount;
+            Counts[key] = current;
+            return Task.FromResult(current);
+        }
+
+        public Task<long> GetAsync(string key, CancellationToken ct = default)
+        {
+            Counts.TryGetValue(key, out var current);
+            OnGet?.Invoke(key); // mutate after reading, to simulate a window roll between polls
+            return Task.FromResult(current);
+        }
+    }
+
     private sealed class FakeClock(DateTimeOffset initial)
     {
         private DateTimeOffset _current = initial;

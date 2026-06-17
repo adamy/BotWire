@@ -134,7 +134,7 @@ internal sealed class BotWireChatService
         }
         sw.Stop();
 
-        _rl.AddTokens(result.TokensUsed);
+        await _rl.AddTokensAsync(result.TokensUsed, ct);
         await SaveAnswerAsync(token, session, req.Message, result, ct);
 
         await _audit.LogAsync(
@@ -225,7 +225,7 @@ internal sealed class BotWireChatService
         string? offTopicMessage = null,
         CancellationToken ct = default)
     {
-        _rl.AddTokens(tokensUsed);
+        await _rl.AddTokensAsync(tokensUsed, ct);
 
         var session = prep.Session!;
 
@@ -315,7 +315,7 @@ internal sealed class BotWireChatService
         }
 
         // Per-IP hourly cap on NEW sessions (design 008 dimension 4): reject over the cap.
-        if (!_rl.TryRegisterIpSession(clientIp))
+        if (!await _rl.TryRegisterIpSessionAsync(clientIp, ct))
         {
             await _audit.LogAsync(AuditEvents.RateLimited("", "MaxSessionsPerIpPerHour"), ct);
             return (new ChatResult("Blocked", _rlOptions.IpSessionCapMessage, "", null, 429), "", false);
@@ -351,7 +351,7 @@ internal sealed class BotWireChatService
             return new ChatResult("RateLimited", _rlOptions.SessionMessageCapMessage, token, null);
         }
 
-        if (_rl.IsTokenBudgetExhausted())
+        if (await _rl.IsTokenBudgetExhaustedAsync(ct))
         {
             await _audit.LogAsync(AuditEvents.RateLimited(token, "DailyTokenBudget"), ct);
             return new ChatResult("RateLimited", _rlOptions.TokenBudgetMessage, token, null);
