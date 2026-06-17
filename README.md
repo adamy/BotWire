@@ -100,7 +100,6 @@ for await (const e of client.streamChat('How do refunds work?')) {
   }
 }
 ```
-
 ## When to use BotWire
 
 Reach for BotWire when you want to:
@@ -161,6 +160,19 @@ builder.Services.AddBotWire(opts =>
 | `DailyTokenBudget` | Degraded response suggesting email contact. |
 
 The daily token total is summed from the provider's reported usage (`TotalTokenCount`, with a character-based estimate when the provider omits it). Counters are **in-memory and per-process** — they reset on restart and are not shared across instances; durable, cross-instance budgeting (Redis) is planned for a later release. Each over-limit hit is recorded in the audit log as a `rate_limited` event naming the dimension.
+
+## Samples
+
+Runnable examples live under [`samples/`](samples/):
+
+| Sample | What it shows |
+|---|---|
+| [`BasicEmail`](samples/BasicEmail) | Minimal ASP.NET Core host: `AddBotWire()` + `MapBotWire()`, the embedded `<botwire-widget>`, and email escalation to [Mailpit](https://mailpit.axllent.org/). The smallest end-to-end setup. |
+| [`RedisShop`](samples/RedisShop) | Multi-container testbed in two parts — a **`RedisShop.Api`** ASP.NET Core service with Redis-backed conversation sessions and distributed rate-limit counters (`.AddBotWireRedis(...)`), and a **`web`** Vite + React + TypeScript shopfront with a hand-built chatbox on the headless [`botwire-js`](https://www.npmjs.com/package/botwire-js) `BotWireClient` (no Web Component). See [its README](samples/RedisShop/README.md) to run it. |
+
+The `RedisShop` sample is the reference for running BotWire across multiple instances:
+sessions survive an API restart and rate-limit counters are shared, because both live in
+Redis instead of process memory.
 
 ## Customization
 

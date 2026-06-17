@@ -116,7 +116,9 @@ public static class BotWireServiceCollectionExtensions
                 rl.TokenBudgetMessage       = src.TokenBudgetMessage;
             })
             .ValidateDataAnnotations();
-        services.AddSingleton<RateLimiter>();
+        services.AddSingleton<RateLimiter>(sp => new RateLimiter(
+            sp.GetRequiredService<IOptions<RateLimitOptions>>(),
+            sp.GetService<IRateLimitStore>()));
 
         // ── Conversation store ──────────────────────────────────────────────────
         services.AddInMemoryConversationStore(o => o.SessionTtl = opts.SessionTtl);

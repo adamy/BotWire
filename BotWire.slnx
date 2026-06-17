@@ -1,16 +1,19 @@
 <Solution>
   <Folder Name="/samples/">
     <Project Path="samples/BasicEmail/BasicEmail.csproj" />
+    <Project Path="samples/RedisShop/api/RedisShop.Api.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/BotWire.AspNetCore/BotWire.AspNetCore.csproj" />
     <Project Path="src/BotWire.Channels.Email/BotWire.Channels.Email.csproj" />
     <Project Path="src/BotWire.Core/BotWire.Core.csproj" />
+    <Project Path="src/BotWire.Redis/BotWire.Redis.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BotWire.AspNetCore.IntegrationTests/BotWire.AspNetCore.IntegrationTests.csproj" />
     <Project Path="tests/BotWire.AspNetCore.Tests/BotWire.AspNetCore.Tests.csproj" />
     <Project Path="tests/BotWire.Channels.Email.Tests/BotWire.Channels.Email.Tests.csproj" />
     <Project Path="tests/BotWire.Core.Tests/BotWire.Core.Tests.csproj" />
+    <Project Path="tests/BotWire.Redis.Tests/BotWire.Redis.Tests.csproj" />
   </Folder>
 </Solution>
