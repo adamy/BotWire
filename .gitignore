@@ -32,5 +32,4 @@ yarn-error.log*
 Thumbs.db
 .mcp.json
 samples/RedisShop/web/tsconfig.tsbuildinfo
-samples/RedisShop/web/.vite/deps/_metadata.json
-samples/RedisShop/web/.vite/deps/package.json
+samples/RedisShop/web/.vite/
