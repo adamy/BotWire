@@ -45,7 +45,7 @@ export class BotWireClient {
   private _sessionToken: string | null = null;
 
   constructor(config: BotWireConfig = {}) {
-    this.endpoint = (config.endpoint ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
+    this.endpoint = stripTrailingSlashes(config.endpoint ?? DEFAULT_ENDPOINT);
     this.publicKey = config.publicKey;
     const f = config.fetch ?? globalThis.fetch;
     if (!f) throw new Error('BotWireClient: no global fetch available — pass config.fetch');
@@ -194,6 +194,17 @@ export class BotWireClient {
     }
     return new BotWireError(status, message, resp.status);
   }
+}
+
+/**
+ * Strip trailing slashes in linear time. A regex like `/\/+$/` triggers CodeQL's
+ * polynomial-redos rule (quadratic backtracking on a long run of slashes), so we scan
+ * from the end instead.
+ */
+function stripTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47 /* '/' */) end--;
+  return s.slice(0, end);
 }
 
 /** Map a raw server SSE event to the SDK's public event shape. Returns `null` to skip. */

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, feature/phase1-5]
 
+# Least privilege: this workflow only builds and tests, so the token needs read-only
+# access to the repo contents and nothing else.
+permissions:
+  contents: read
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
