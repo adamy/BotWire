@@ -93,6 +93,7 @@ public static class BotWireServiceCollectionExtensions
                 o.Enabled            = opts.PiiGuard.Enabled;
                 o.RejectionMessage   = opts.PiiGuard.RejectionMessage;
                 o.AdditionalPatterns = opts.PiiGuard.AdditionalPatterns;
+                o.ConfigureDetector  = opts.PiiGuard.ConfigureDetector;
             },
             configureRateLimit: o => o.MaxRequestsPerIpPerMinute = opts.MaxRequestsPerIpPerMinute,
             configureInjection: o =>

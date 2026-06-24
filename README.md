@@ -400,10 +400,11 @@ provider charges. When you deploy BotWire:
 ### Customer PII
 
 Handling your customers' personal data is **your responsibility**. BotWire ships
-a best-effort PII guard (enabled by default) that **blocks** user messages
-matching common patterns — email addresses, phone numbers, and credit-card-like
-numbers — before they are sent to the AI provider. Add your own patterns via
-`PiiGuard.AdditionalPatterns`:
+a best-effort PII guard (enabled by default), backed by
+[RedactWire](https://github.com/adamy/RedactWire), that **blocks** user messages
+containing personal data — email addresses, credit-card numbers, IP addresses,
+IBANs, API keys/secrets, and country-specific identifiers — before they are sent
+to the AI provider. Add your own patterns via `PiiGuard.AdditionalPatterns`:
 
 ```csharp
 builder.Services.AddBotWire(opts =>
@@ -412,7 +413,24 @@ builder.Services.AddBotWire(opts =>
 });
 ```
 
-This guard is regex-based and **not exhaustive**: it will not catch every form
+For full control — extra country rule packs, custom `IPiiRule`s, overlap strategy —
+configure the underlying RedactWire detector via `PiiGuard.ConfigureDetector`:
+
+```csharp
+using System.Globalization;
+using RedactWire;
+
+builder.Services.AddBotWire(opts =>
+{
+    opts.PiiGuard.ConfigureDetector = b => b
+        .AddCulture(new CultureInfo("en-US")); // enable a country's ID rule pack
+});
+```
+
+Secret detection and the culture-agnostic rules (email, credit card, IP, IBAN)
+are on by default; the default culture is `CultureInfo.CurrentCulture`.
+
+This guard is regex/checksum-based and **not exhaustive**: it will not catch every form
 of personal data, and it rejects rather than redacts. You must confirm, for your
 own jurisdiction and data, that no personal data you are not permitted to share
 is sent to your AI provider — for example by tuning the patterns, restricting
