@@ -64,7 +64,8 @@ public class BotWireChatServiceTests
             new FakeSummaryCompressor(),
             NullAuditLogger.Instance,
             Options.Create(new BotWireOptions { MaxMessageLength = maxMsg }),
-            Options.Create(new PiiGuardOptions()));
+            Options.Create(new PiiGuardOptions()),
+            Options.Create(new PromptInjectionOptions()));
 
         return (svc, store);
     }
@@ -169,7 +170,7 @@ public class BotWireChatServiceTests
         var (svc, _) = Create(piiBlocks: true);
         var result = await svc.AnswerAsync(ChatReq(), "1.2.3.4");
         Assert.Equal(400, result.HttpStatusCode);
-        Assert.Equal("Blocked", result.Status);
+        Assert.Equal("PiiBlocked", result.Status);
     }
 
     [Fact]

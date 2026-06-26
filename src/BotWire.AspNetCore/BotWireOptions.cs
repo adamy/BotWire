@@ -80,9 +80,9 @@ public sealed class BotWireOptions
     public PromptInjectionOptions PromptInjection { get; set; } = new();
 
     /// <summary>
-    /// PII detection settings. Enabled by default — blocks user messages matching
-    /// common personal-data patterns (email, phone, credit-card) before they reach
-    /// the AI provider. Add your own patterns via <see cref="PiiGuardOptions.AdditionalPatterns"/>.
+    /// PII detection settings. Enabled by default — blocks user messages containing
+    /// personal data (email, phone, credit-card, secrets, ...) before they reach the AI
+    /// provider. Backed by RedactWire; customize via <see cref="PiiGuardOptions.ConfigureDetector"/>.
     /// </summary>
     public PiiGuardOptions PiiGuard { get; set; } = new();
 

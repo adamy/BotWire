@@ -1,12 +1,21 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)publish, e.g. v0.4.0"
+        required: true
+        type: string
 
 permissions:
   contents: write   # create the GitHub Release
   id-token: write   # NuGet Trusted Publishing (OIDC)
+
+# Release is manual-only: the tag to publish comes from the workflow_dispatch input.
+# Every job/step uses REF_NAME (not GITHUB_REF_NAME) and checks out this tag.
+env:
+  REF_NAME: ${{ github.event.inputs.tag }}
 
 jobs:
   release:
@@ -16,10 +25,10 @@ jobs:
 
       - name: Verify tag matches VersionPrefix
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${REF_NAME#v}"
           PREFIX=$(grep -oPm1 '(?<=<VersionPrefix>)[^<]+' Directory.Build.props)
           if [ "$VERSION" != "$PREFIX" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match VersionPrefix $PREFIX in Directory.Build.props" >&2
+            echo "Tag $REF_NAME does not match VersionPrefix $PREFIX in Directory.Build.props" >&2
             exit 1
           fi
 
@@ -59,12 +68,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          args=(--title "BotWire $GITHUB_REF_NAME" --generate-notes)
-          notes="docs/release-notes/$GITHUB_REF_NAME.md"
+          args=(--title "BotWire $REF_NAME" --generate-notes)
+          notes="docs/release-notes/$REF_NAME.md"
           if [ -f "$notes" ]; then
             args+=(--notes-file "$notes")
           fi
-          gh release create "$GITHUB_REF_NAME" artifacts/*.nupkg artifacts/*.snupkg "${args[@]}"
+          # On a re-run the release may already exist; create it, else just upload assets.
+          if gh release view "$REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$REF_NAME" artifacts/*.nupkg artifacts/*.snupkg --clobber
+          else
+            gh release create "$REF_NAME" artifacts/*.nupkg artifacts/*.snupkg "${args[@]}"
+          fi
 
   npm:
     needs: release   # only publish the JS SDK once the .NET release succeeded
@@ -80,10 +94,10 @@ jobs:
 
       - name: Verify tag matches package.json version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${REF_NAME#v}"
           PKG=$(node -p "require('./package.json').version")
           if [ "$VERSION" != "$PKG" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match botwire-js version $PKG in package.json" >&2
+            echo "Tag $REF_NAME does not match botwire-js version $PKG in package.json" >&2
             exit 1
           fi
 

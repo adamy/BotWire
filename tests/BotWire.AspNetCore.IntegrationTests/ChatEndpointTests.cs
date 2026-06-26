@@ -172,7 +172,7 @@ public class ChatEndpointTests
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
 
         var body = await resp.Content.ReadFromJsonAsync<ChatResponse>();
-        Assert.Equal("Blocked", body!.Status);
+        Assert.Equal("PiiBlocked", body!.Status);
     }
 
     [Fact]
@@ -212,5 +212,26 @@ public class ChatEndpointTests
 
         var body = await resp.Content.ReadFromJsonAsync<ChatResponse>();
         Assert.Equal("InvalidSession", body!.Status);
+    }
+
+    [Fact]
+    public async Task WidgetJs_RevalidatesViaETag_NoLongCache()
+    {
+        await using var host = await BotWireTestHost.CreateAsync();
+
+        var first = await host.Client.GetAsync("/botwire/widget.js");
+        first.EnsureSuccessStatusCode();
+        var etag = first.Headers.ETag;
+
+        // Must revalidate (no stale hour-long cache) and carry an ETag so updates propagate.
+        Assert.NotNull(etag);
+        Assert.True(first.Headers.CacheControl!.NoCache);
+        Assert.Null(first.Headers.CacheControl.MaxAge);
+
+        // A conditional re-request with the same ETag is a cheap 304, not a re-download.
+        var conditional = new HttpRequestMessage(HttpMethod.Get, "/botwire/widget.js");
+        conditional.Headers.IfNoneMatch.Add(etag!);
+        var second = await host.Client.SendAsync(conditional);
+        Assert.Equal(HttpStatusCode.NotModified, second.StatusCode);
     }
 }

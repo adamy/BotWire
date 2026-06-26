@@ -20,7 +20,7 @@ export interface BotWireConfig {
 
 /** Result of a non-streaming {@link BotWireClient.chat} call. */
 export interface BotWireResponse {
-  /** Server status, e.g. `Answered`, `NeedHuman`, `TicketCreated`, `Blocked`, `RateLimited`. */
+  /** Server status, e.g. `Answered`, `NeedHuman`, `TicketCreated`, `Blocked`, `PiiBlocked`, `RateLimited`. */
   status: string;
   /** The assistant message (or status explanation). */
   message: string;

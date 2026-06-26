@@ -147,7 +147,21 @@ describe('widget session self-healing', () => {
     expect(calls.filter(c => c.url.endsWith('/chat/stream'))).toHaveLength(1);
     expect(calls.filter(c => c.url.endsWith('/session'))).toHaveLength(0);
     expect(sessionStorage.getItem(STORAGE_KEY)).toBe('valid-token');
-    expect(messagesOf(el, '.msg-sys')).toHaveLength(1);
+    // Guard rejections surface the server's specific message, not the generic error.
+    expect(messagesOf(el, '.msg-sys')).toEqual(['Message too long.']);
+  });
+
+  it('shows the server message for a PiiBlocked rejection, not the generic error', async () => {
+    sessionStorage.setItem(STORAGE_KEY, 'valid-token');
+    const pii = 'Your message contains sensitive information and cannot be processed.';
+    stubFetch(() =>
+      jsonResponse(400, { status: 'PiiBlocked', message: pii, sessionToken: 'valid-token' }));
+
+    const el = mountWidget();
+    sendMessage(el, 'email me at a@b.com');
+    await streamFinished(el);
+
+    expect(messagesOf(el, '.msg-sys')).toEqual([pii]);
   });
 });
 

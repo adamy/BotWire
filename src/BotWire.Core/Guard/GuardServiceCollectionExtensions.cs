@@ -47,13 +47,13 @@ public static class GuardServiceCollectionExtensions
         services.AddSingleton<IPiiGuard>(sp =>
         {
             var opts = sp.GetRequiredService<IOptions<PiiGuardOptions>>();
-            var logger = sp.GetRequiredService<ILogger<RegexPiiGuard>>();
+            var logger = sp.GetRequiredService<ILogger<RedactWirePiiGuard>>();
             if (!opts.Value.Enabled)
             {
                 logger.LogInformation("BotWire: PiiGuard disabled.");
                 return NullPiiGuard.Instance;
             }
-            return new RegexPiiGuard(opts, logger);
+            return new RedactWirePiiGuard(opts, logger);
         });
 
         var rlBuilder = services.AddOptions<RateLimiterOptions>();

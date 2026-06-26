@@ -541,9 +541,14 @@ class BotWireWidget extends HTMLElement {
       if (err instanceof DOMException && err.name === 'AbortError') {
         // user navigated away / aborted — stay silent
       } else if (err instanceof BotWireError) {
-        // server rejected the turn — surface the host-configured message
         this.errorOccurred = true;
-        this.appendMessage('sys', this.errorMessage);
+        // Guard rejections (PII, prompt-injection, message-too-long, rate-limit) carry a
+        // deliberate, user-facing message from the server — surface it so the user knows
+        // why their message was refused (e.g. it contained personal data) instead of a
+        // generic failure. True transport/server faults fall back to the configured error.
+        const GUARD_STATUSES = ['PiiBlocked', 'Blocked', 'RateLimited'];
+        const msg = GUARD_STATUSES.includes(err.status) && err.message ? err.message : this.errorMessage;
+        this.appendMessage('sys', msg);
       } else {
         this.appendMessage('sys', 'Connection error. Please try again.');
       }
