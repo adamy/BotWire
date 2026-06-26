@@ -1,6 +1,6 @@
 # Commercial licensing
 
-BotWire is open source under the [GNU Affero General Public License v3](LICENSE) (AGPL-3.0). A commercial license is available when AGPL terms do not fit your use case.
+BotWire is open source under the [GNU Affero General Public License v3](LICENSE) (AGPL-3.0). A commercial license is available when AGPL terms do not fit your use case — and for most closed-source products, buying one is simpler and cheaper than meeting AGPL's source-disclosure obligations.
 
 ## What AGPL means for commercial users
 
@@ -10,24 +10,39 @@ AGPL is a good fit when you can open-source your changes or when your use does n
 
 ## What a commercial license provides
 
-A commercial license from Object IT Limited typically allows:
+A commercial license from Object IT Limited lets you:
 
-- Use of BotWire in **proprietary** products and services
-- Distribution **without** AGPL source-code disclosure obligations for your application
-- A **direct licensing relationship** with the copyright holder, separate from the public AGPL terms
+- Use BotWire in **proprietary** products and services
+- Distribute **without** AGPL source-code disclosure obligations for your application
+- Hold a **direct licensing relationship** with the copyright holder, separate from the public AGPL terms
 
-Specific terms (scope, pricing, support, updates) are agreed per customer. This document is informational only and does not constitute an offer.
+If you'd otherwise be paying for a hosted support tool like Zendesk, Intercom, or Azure's bot services, a one-off or annual BotWire license is typically a fraction of those subscriptions — and you keep full control of your data and hosting.
 
-## How to get in touch
+## Pricing
 
-Go to **[objectit.co.nz/botwire](https://www.objectit.co.nz/botwire)** and click **"Get a License"** to start a commercial-licensing conversation with Object IT Limited. Please include:
+All prices are in USD. Final tax (VAT/GST/sales tax) is calculated and shown at checkout based on your location.
 
-- Your company name and contact email
-- How you plan to use BotWire (internal tool, SaaS, embedded in a product, etc.)
-- Whether you need redistribution rights for a closed-source product
+| License | Price | What you get |
+|---|---|---|
+| **Annual commercial license** | **$599 / year** | Right to use BotWire in closed-source / proprietary products and services without AGPL source-disclosure obligations. Includes all updates released during your active subscription. [Buy the annual license](https://objectit.lemonsqueezy.com/checkout/buy/ac21528d-f7f7-4847-8201-e545bcbe22e5) |
+| **Perpetual buy-out license** | **$1,499 one-time** | Perpetual commercial-use rights to the current version **and all future versions**. One-time payment, no renewal — the "no recurring fees" option for businesses that prefer a one-time capital purchase. [Buy the perpetual license](https://objectit.lemonsqueezy.com/checkout/buy/5c124e41-c354-4ccd-b5cb-d1e46676984a) |
 
-We will respond with next steps for licensing terms and pricing.
+**If an annual subscription lapses:** instances you've already deployed are not retroactively revoked, but you lose the right to use *new* versions commercially. To keep using newer releases commercially, either renew or comply with AGPL.
 
-Prefer GitHub? You can instead open a [GitHub Discussion](https://github.com/adamy/BotWire/discussions) with the label **commercial-license**.
+### How purchasing works
 
-For general technical questions unrelated to licensing, use Discussions or open an issue on the repository.
+Checkout is handled by [Lemon Squeezy](https://www.lemonsqueezy.com/), acting as Merchant of Record. They calculate and collect any applicable tax/VAT at checkout, handle invoicing, and deliver your license key automatically by email immediately after payment — there's no manual step on our side. The binding license terms are included with your purchase.
+
+## Support
+
+A commercial license grants **usage rights only**. It does **not** include any support commitment, SLA, or guaranteed response time. We've kept it this way deliberately so the price stays low and predictable.
+
+- **Updates and bug fixes** are published on the maintainer's own schedule via [GitHub releases](https://github.com/adamy/BotWire/releases). Paying customers and community (AGPL) users receive them the same way.
+- **Public GitHub [Issues](https://github.com/adamy/BotWire/issues) and [Discussions](https://github.com/adamy/BotWire/discussions)** are open to everyone and are best-effort, with no guaranteed response time.
+- If you need **guaranteed response times or one-on-one integration help**, a **Priority email support** add-on is available, quoted per case (it's separate from the license). Email us via the contact page below to inquire.
+
+## Questions & priority support
+
+For the **Priority email support** add-on, or for any non-standard licensing question (volume, redistribution beyond the standard terms, etc.), reach us at **[objectit.co.nz/botwire](https://www.objectit.co.nz/botwire)**, or open a [GitHub Discussion](https://github.com/adamy/BotWire/discussions) with the label **commercial-license**.
+
+The standard $599/year and $1,499 one-time licenses don't need a conversation — just use the checkout links above and your key arrives automatically.
