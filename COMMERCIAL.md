@@ -24,8 +24,8 @@ All prices are in USD. Final tax (VAT/GST/sales tax) is calculated and shown at 
 
 | License | Price | What you get |
 |---|---|---|
-| **Annual commercial license** | **$599 / year** | Right to use BotWire in closed-source / proprietary products and services without AGPL source-disclosure obligations. Includes all updates released during your active subscription. [Buy the annual license](https://objectit.lemonsqueezy.com/checkout/buy/e2d582ef-469b-4892-a16e-ba99cf44d34e) |
-| **Perpetual buy-out license** | **$1,499 one-time** | Perpetual commercial-use rights to the current version **and all future versions**. One-time payment, no renewal — the "no recurring fees" option for businesses that prefer a one-time capital purchase. [Buy the perpetual license](https://objectit.lemonsqueezy.com/checkout/buy/ca437b23-9244-495d-88ef-e20348660263) |
+| **Annual commercial license** | **$599 / year** | Right to use BotWire in closed-source / proprietary products and services without AGPL source-disclosure obligations. Includes all updates released during your active subscription. [Buy the annual license](https://objectit.lemonsqueezy.com/checkout/buy/ac21528d-f7f7-4847-8201-e545bcbe22e5) |
+| **Perpetual buy-out license** | **$1,499 one-time** | Perpetual commercial-use rights to the current version **and all future versions**. One-time payment, no renewal — the "no recurring fees" option for businesses that prefer a one-time capital purchase. [Buy the perpetual license](https://objectit.lemonsqueezy.com/checkout/buy/5c124e41-c354-4ccd-b5cb-d1e46676984a) |
 
 **If an annual subscription lapses:** instances you've already deployed are not retroactively revoked, but you lose the right to use *new* versions commercially. To keep using newer releases commercially, either renew or comply with AGPL.
 
