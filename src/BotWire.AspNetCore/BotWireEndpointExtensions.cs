@@ -200,6 +200,10 @@ public static class BotWireEndpointExtensions
 
     private static readonly byte[] _widgetJs = LoadWidgetJs();
 
+    // Content-hash ETag so browsers revalidate cheaply (304) yet pick up a rebuilt widget
+    // immediately — a long max-age would otherwise serve a stale bundle for up to an hour.
+    private static readonly string _widgetJsETag = ComputeETag(_widgetJs);
+
     private static byte[] LoadWidgetJs()
     {
         var asm    = typeof(BotWireEndpointExtensions).Assembly;
@@ -210,10 +214,26 @@ public static class BotWireEndpointExtensions
         return ms.ToArray();
     }
 
+    private static string ComputeETag(byte[] bytes)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+        return $"\"{Convert.ToHexString(hash, 0, 8)}\"";
+    }
+
     private static async Task HandleWidgetJs(HttpContext context)
     {
-        context.Response.ContentType              = "application/javascript; charset=utf-8";
-        context.Response.Headers.CacheControl = "public, max-age=3600";
+        // must-revalidate: cache is allowed but the browser must check the ETag on every use,
+        // so a new widget build is served the moment it changes (no hour-long staleness).
+        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.Headers.ETag         = _widgetJsETag;
+
+        if (context.Request.Headers.IfNoneMatch.ToString().Contains(_widgetJsETag))
+        {
+            context.Response.StatusCode = StatusCodes.Status304NotModified;
+            return;
+        }
+
+        context.Response.ContentType = "application/javascript; charset=utf-8";
         await context.Response.Body.WriteAsync(_widgetJs);
     }
 

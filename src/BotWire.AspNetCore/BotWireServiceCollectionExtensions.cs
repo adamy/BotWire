@@ -99,6 +99,7 @@ public static class BotWireServiceCollectionExtensions
             configureInjection: o =>
             {
                 o.Enabled            = opts.PromptInjection.Enabled;
+                o.RejectionMessage   = opts.PromptInjection.RejectionMessage;
                 o.AdditionalPatterns = opts.PromptInjection.AdditionalPatterns;
             });
 

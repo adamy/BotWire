@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+using System.ComponentModel.DataAnnotations;
+
 namespace BotWire.Core.Guard;
 
 /// <summary>Configuration for heuristic prompt injection detection.</summary>
@@ -24,6 +26,14 @@ public sealed class PromptInjectionOptions
     /// <see cref="NullPromptInjectionGuard"/> is used. Defaults to <see langword="true"/>.
     /// </summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Message returned to the caller when a prompt-injection attempt is blocked. Kept
+    /// deliberately neutral (it does not reveal that injection detection fired).
+    /// </summary>
+    [Required]
+    public string RejectionMessage { get; set; } =
+        "Your message couldn't be processed. Please rephrase and try again.";
 
     /// <summary>
     /// Additional regex patterns (case-insensitive) appended after the built-in defaults.

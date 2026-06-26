@@ -79,7 +79,13 @@ export const ChatWidget = forwardRef<ChatHandle>(function ChatWidget(_props, ref
       }
     } catch (e) {
       if (controller.signal.aborted) return; // reset/close superseded this turn
-      const msg = e instanceof BotWireError ? e.message : 'Something went wrong. Please try again.';
+      // Guard rejections (PII, prompt-injection, message-too-long, rate-limit) carry a
+      // deliberate, user-facing message from the server — surface it so the user knows why
+      // their message was refused (e.g. it contained personal data). Duck-typed on `status`
+      // so it holds across botwire-js versions; transport faults get a generic message.
+      const err = e as Partial<BotWireError>;
+      const isGuard = !!err?.status && ['PiiBlocked', 'Blocked', 'RateLimited'].includes(err.status);
+      const msg = isGuard && err.message ? err.message : 'Something went wrong. Please try again.';
       setMessages((m) => replaceLastBotIfEmpty(m, msg));
     } finally {
       if (abortRef.current === controller) {

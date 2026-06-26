@@ -57,7 +57,8 @@ public class BotWireChatServiceAuditTests
             new FakeSummaryCompressor(),
             audit,
             Options.Create(new BotWireOptions()),
-            Options.Create(new PiiGuardOptions()));
+            Options.Create(new PiiGuardOptions()),
+            Options.Create(new PromptInjectionOptions()));
 
         return (svc, audit);
     }

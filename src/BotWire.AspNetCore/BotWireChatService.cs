@@ -67,6 +67,7 @@ internal sealed class BotWireChatService
     private readonly IAuditLogger _audit;
     private readonly IOptions<BotWireOptions> _options;
     private readonly IOptions<PiiGuardOptions> _piiOptions;
+    private readonly IOptions<PromptInjectionOptions> _injectionOptions;
 
     public BotWireChatService(
         IAnswerProvider answers,
@@ -80,20 +81,22 @@ internal sealed class BotWireChatService
         ISummaryCompressor compressor,
         IAuditLogger audit,
         IOptions<BotWireOptions> options,
-        IOptions<PiiGuardOptions> piiOptions)
+        IOptions<PiiGuardOptions> piiOptions,
+        IOptions<PromptInjectionOptions> injectionOptions)
     {
-        _answers        = answers;
-        _sessions       = sessions;
-        _tokens         = tokens;
-        _piiGuard       = piiGuard;
-        _injectionGuard = injectionGuard;
-        _rateLimiter    = rateLimiter;
-        _rl             = rl;
-        _rlOptions      = rlOptions.Value;
-        _compressor     = compressor;
-        _audit          = audit;
-        _options        = options;
-        _piiOptions     = piiOptions;
+        _answers          = answers;
+        _sessions         = sessions;
+        _tokens           = tokens;
+        _piiGuard         = piiGuard;
+        _injectionGuard   = injectionGuard;
+        _rateLimiter      = rateLimiter;
+        _rl               = rl;
+        _rlOptions        = rlOptions.Value;
+        _compressor       = compressor;
+        _audit            = audit;
+        _options          = options;
+        _piiOptions       = piiOptions;
+        _injectionOptions = injectionOptions;
     }
 
     /// <summary>
@@ -441,13 +444,13 @@ internal sealed class BotWireChatService
         if (pii.Blocked)
         {
             await _audit.LogAsync(AuditEvents.GuardBlocked(sessionId, "pii"), ct);
-            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionId, null, 400);
+            return new ChatResult("PiiBlocked", _piiOptions.Value.RejectionMessage, sessionId, null, 400);
         }
 
         if (_injectionGuard.IsInjectionAttempt(message))
         {
             await _audit.LogAsync(AuditEvents.GuardBlocked(sessionId, "prompt_injection"), ct);
-            return new ChatResult("Blocked", _piiOptions.Value.RejectionMessage, sessionId, null, 400);
+            return new ChatResult("Blocked", _injectionOptions.Value.RejectionMessage, sessionId, null, 400);
         }
 
         return null;
